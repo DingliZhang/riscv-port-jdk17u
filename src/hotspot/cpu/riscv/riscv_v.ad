@@ -97,7 +97,6 @@ source %{
       case Op_VectorStoreMask:
       case Op_VectorTest:
       case Op_PopCountVI:
-      case Op_PopCountVL:
         return false;
       default:
         return UseRVV;
