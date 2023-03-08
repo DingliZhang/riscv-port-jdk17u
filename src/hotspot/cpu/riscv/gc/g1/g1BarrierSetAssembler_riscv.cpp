@@ -158,7 +158,7 @@ void G1BarrierSetAssembler::g1_write_barrier_pre(MacroAssembler* masm,
 
   __ bind(runtime);
 
-  __ push_reg(saved, sp);
+  __ push_call_clobbered_registers();
 
   if (expand_call) {
     assert(pre_val != c_rarg1, "smashed arg");
