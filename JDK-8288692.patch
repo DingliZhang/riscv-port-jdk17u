@@ -1,0 +1,50 @@
+diff --git a/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/HtmlDocletWriter.java b/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/HtmlDocletWriter.java
+index 09966860988..cd10dd142e3 100644
+--- a/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/HtmlDocletWriter.java
++++ b/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/HtmlDocletWriter.java
+@@ -984,7 +984,13 @@ public Content seeTagToContent(Element element, DocTree see, TagletWriterImpl.Co
+             case LINK, LINK_PLAIN -> {
+                 // {@link[plain] reference label...}
+                 LinkTree lt = (LinkTree) see;
+-                refText = lt.getReference().toString();
++                var linkRef = lt.getReference();
++                if (linkRef == null) {
++                    messages.warning(ch.getDocTreePath(see),"doclet.link.no_reference");
++                    return invalidTagOutput(resources.getText("doclet.tag.invalid_input", lt.toString()),
++                        Optional.empty());
++                }
++                refText = linkRef.toString();
+                 label = lt.getLabel();
+             }
+ 
+diff --git a/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/resources/standard.properties b/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/resources/standard.properties
+index 1c885086b26..ef19366c427 100644
+--- a/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/resources/standard.properties
++++ b/src/jdk.javadoc/share/classes/jdk/javadoc/internal/doclets/formats/html/resources/standard.properties
+@@ -102,6 +102,7 @@ doclet.MalformedURL=Malformed URL: {0}
+ doclet.File_error=Error reading file: {0}
+ doclet.URL_error=Error fetching URL: {0}
+ doclet.Resource_error=Error reading resource: {0}
++doclet.link.no_reference=no reference given
+ doclet.see.class_or_package_not_found=Tag {0}: reference not found: {1}
+ doclet.see.class_or_package_not_accessible=Tag {0}: reference not accessible: {1}
+ doclet.see.nested_link=Tag {0}: nested link
+diff --git a/test/langtools/jdk/javadoc/doclet/testTagMisuse/TestTagMisuse.java b/test/langtools/jdk/javadoc/doclet/testTagMisuse/TestTagMisuse.java
+index 8278abe9058..6d879bbab97 100644
+--- a/test/langtools/jdk/javadoc/doclet/testTagMisuse/TestTagMisuse.java
++++ b/test/langtools/jdk/javadoc/doclet/testTagMisuse/TestTagMisuse.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2001, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2001, 2022, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -23,6 +23,7 @@
+ 
+ /*
+  * @test
++ * @bug 8035473 8288692
+  * @summary Determine if proper warning messages are printed.
+  * @library ../../lib
+  * @modules jdk.javadoc/jdk.javadoc.internal.tool

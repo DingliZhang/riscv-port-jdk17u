@@ -1,0 +1,258 @@
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.cpp b/src/hotspot/cpu/riscv/assembler_riscv.cpp
+index 7eb878d37cd..32b06e30c79 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.cpp
+@@ -311,13 +311,6 @@ void Assembler::movptr(Register Rd, address addr) {
+   addi(Rd, Rd, offset);
+ }
+ 
+-void Assembler::ifence() {
+-  fence_i();
+-  if (UseConservativeFence) {
+-    fence(ir, ir);
+-  }
+-}
+-
+ #define INSN(NAME, NEG_INSN)                                                         \
+   void Assembler::NAME(Register Rs, Register Rt, const address &dest) {              \
+     NEG_INSN(Rt, Rs, dest);                                                          \
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.hpp b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+index d6b303e0b63..bbbb918d768 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+@@ -317,7 +317,6 @@ class Assembler : public AbstractAssembler {
+   void movptr(Register Rd, address addr);
+   void movptr_with_offset(Register Rd, address addr, int32_t &offset);
+   void movptr(Register Rd, uintptr_t imm64);
+-  void ifence();
+   void j(const address &dest, Register temp = t0);
+   void j(const Address &adr, Register temp = t0);
+   void j(Label &l, Register temp = t0);
+@@ -939,7 +938,6 @@ class Assembler : public AbstractAssembler {
+     emit(insn);                                             \
+   }
+ 
+-  INSN(fence_i, 0b0001111, 0b001, 0b000000000000);
+   INSN(ecall,   0b1110011, 0b000, 0b000000000000);
+   INSN(_ebreak, 0b1110011, 0b000, 0b000000000001);
+ 
+diff --git a/src/hotspot/cpu/riscv/compiledIC_riscv.cpp b/src/hotspot/cpu/riscv/compiledIC_riscv.cpp
+index 75bc4be7840..d202db92a4c 100644
+--- a/src/hotspot/cpu/riscv/compiledIC_riscv.cpp
++++ b/src/hotspot/cpu/riscv/compiledIC_riscv.cpp
+@@ -69,8 +69,8 @@ address CompiledStaticCall::emit_to_interp_stub(CodeBuffer &cbuf, address mark)
+ #undef __
+ 
+ int CompiledStaticCall::to_interp_stub_size() {
+-  // fence_i + fence* + (lui, addi, slli, addi, slli, addi) + (lui, addi, slli, addi, slli) + jalr
+-  return NativeFenceI::instruction_size() + 12 * NativeInstruction::instruction_size;
++  // (lui, addi, slli, addi, slli, addi) + (lui, addi, slli, addi, slli) + jalr
++  return 12 * NativeInstruction::instruction_size;
+ }
+ 
+ int CompiledStaticCall::to_trampoline_stub_size() {
+@@ -98,7 +98,7 @@ void CompiledDirectStaticCall::set_to_interpreted(const methodHandle& callee, ad
+ 
+   // Creation also verifies the object.
+   NativeMovConstReg* method_holder
+-    = nativeMovConstReg_at(stub + NativeFenceI::instruction_size());
++    = nativeMovConstReg_at(stub);
+ #ifdef ASSERT
+   NativeGeneralJump* jump = nativeGeneralJump_at(method_holder->next_instruction_address());
+ 
+@@ -119,7 +119,7 @@ void CompiledDirectStaticCall::set_stub_to_clean(static_stub_Relocation* static_
+   assert(CompiledICLocker::is_safe(stub), "mt unsafe call");
+   // Creation also verifies the object.
+   NativeMovConstReg* method_holder
+-    = nativeMovConstReg_at(stub + NativeFenceI::instruction_size());
++    = nativeMovConstReg_at(stub);
+   method_holder->set_data(0);
+   NativeJump* jump = nativeJump_at(method_holder->next_instruction_address());
+   jump->set_jump_destination((address)-1);
+@@ -139,7 +139,7 @@ void CompiledDirectStaticCall::verify() {
+   assert(stub != NULL, "no stub found for static call");
+   // Creation also verifies the object.
+   NativeMovConstReg* method_holder
+-    = nativeMovConstReg_at(stub + NativeFenceI::instruction_size());
++    = nativeMovConstReg_at(stub);
+   NativeJump* jump = nativeJump_at(method_holder->next_instruction_address());
+ 
+   // Verify state.
+diff --git a/src/hotspot/cpu/riscv/globals_riscv.hpp b/src/hotspot/cpu/riscv/globals_riscv.hpp
+index 32053a5900e..cdfd35dd17c 100644
+--- a/src/hotspot/cpu/riscv/globals_riscv.hpp
++++ b/src/hotspot/cpu/riscv/globals_riscv.hpp
+@@ -87,8 +87,7 @@ define_pd_global(intx, InlineSmallCode,          1000);
+   product(bool, TraceTraps, false, "Trace all traps the signal handler")         \
+   /* For now we're going to be safe and add the I/O bits to userspace fences. */ \
+   product(bool, UseConservativeFence, true,                                      \
+-          "Extend i for r and o for w in the pred/succ flags of fence;"          \
+-          "Extend fence.i to fence.i + fence.")                                  \
++          "Extend i for r and o for w in the pred/succ flags of fence")          \
+   product(bool, AvoidUnalignedAccesses, true,                                    \
+           "Avoid generating unaligned memory accesses")                          \
+   product(bool, UseRVV, false, EXPERIMENTAL, "Use RVV instructions")             \
+diff --git a/src/hotspot/cpu/riscv/icache_riscv.cpp b/src/hotspot/cpu/riscv/icache_riscv.cpp
+index 9b628738852..e6c2586e5bd 100644
+--- a/src/hotspot/cpu/riscv/icache_riscv.cpp
++++ b/src/hotspot/cpu/riscv/icache_riscv.cpp
+@@ -30,6 +30,14 @@
+ #define __ _masm->
+ 
+ static int icache_flush(address addr, int lines, int magic) {
++  // To make a store to instruction memory visible to all RISC-V harts,
++  // the writing hart has to execute a data FENCE before requesting that
++  // all remote RISC-V harts execute a FENCE.I.
++  //
++  // No sush assurance is defined at the interface level of the builtin
++  // method, and so we should make sure it works.
++  __asm__ volatile("fence rw, rw" : : : "memory");
++
+   __builtin___clear_cache(addr, addr + (lines << ICache::log2_line_size));
+   return magic;
+ }
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 7c987cd7d9d..5ff57a3cdb8 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -556,7 +556,6 @@ void MacroAssembler::emit_static_call_stub() {
+   // CompiledDirectStaticCall::set_to_interpreted knows the
+   // exact layout of this stub.
+ 
+-  ifence();
+   mov_metadata(xmethod, (Metadata*)NULL);
+ 
+   // Jump to the entry point of the i2c stub.
+@@ -1669,7 +1668,6 @@ void MacroAssembler::movoop(Register dst, jobject obj, bool immediate) {
+ 
+   // nmethod entry barrier necessitate using the constant pool. They have to be
+   // ordered with respected to oop access.
+-  // Using immediate literals would necessitate fence.i.
+   if (BarrierSet::barrier_set()->barrier_set_nmethod() != NULL || !immediate) {
+     address dummy = address(uintptr_t(pc()) & -wordSize); // A nearby aligned address
+     ld_constant(dst, Address(dummy, rspec));
+@@ -2759,7 +2757,6 @@ void MacroAssembler::build_frame(int framesize) {
+   sd(fp, Address(sp, framesize - 2 * wordSize));
+   sd(ra, Address(sp, framesize - wordSize));
+   if (PreserveFramePointer) { add(fp, sp, framesize); }
+-  verify_cross_modify_fence_not_required();
+ }
+ 
+ void MacroAssembler::remove_frame(int framesize) {
+@@ -3028,7 +3025,6 @@ address MacroAssembler::read_polling_page(Register r, int32_t offset, relocInfo:
+     lwu(zr, Address(r, offset));
+     mark = inst_mark();
+   }
+-  verify_cross_modify_fence_not_required();
+   return mark;
+ }
+ 
+@@ -4212,29 +4208,3 @@ void MacroAssembler::cmp_l2i(Register dst, Register src1, Register src2, Registe
+   neg(dst, dst);
+   bind(done);
+ }
+-
+-void MacroAssembler::safepoint_ifence() {
+-  ifence();
+-#ifndef PRODUCT
+-  if (VerifyCrossModifyFence) {
+-    // Clear the thread state.
+-    sb(zr, Address(xthread, in_bytes(JavaThread::requires_cross_modify_fence_offset())));
+-  }
+-#endif
+-}
+-
+-#ifndef PRODUCT
+-void MacroAssembler::verify_cross_modify_fence_not_required() {
+-  if (VerifyCrossModifyFence) {
+-    // Check if thread needs a cross modify fence.
+-    lbu(t0, Address(xthread, in_bytes(JavaThread::requires_cross_modify_fence_offset())));
+-    Label fence_not_required;
+-    beqz(t0, fence_not_required);
+-    // If it does then fail.
+-    la(t0, RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::verify_cross_modify_fence_failure)));
+-    mv(c_rarg0, xthread);
+-    jalr(t0);
+-    bind(fence_not_required);
+-  }
+-}
+-#endif
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index e7c71271fed..e56dc873557 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -46,9 +46,6 @@ class MacroAssembler: public Assembler {
+ 
+   void safepoint_poll(Label& slow_path, bool at_return, bool acquire, bool in_nmethod);
+ 
+-  // Place a fence.i after code may have been modified due to a safepoint.
+-  void safepoint_ifence();
+-
+   // Alignment
+   void align(int modulus, int extra_offset = 0);
+ 
+@@ -856,9 +853,6 @@ class MacroAssembler: public Assembler {
+   void load_reserved(Register addr, enum operand_size size, Assembler::Aqrl acquire);
+   void store_conditional(Register addr, Register new_val, enum operand_size size, Assembler::Aqrl release);
+ 
+-  // Check the current thread doesn't need a cross modify fence.
+-  void verify_cross_modify_fence_not_required() PRODUCT_RETURN;
+-
+   void load_prototype_header(Register dst, Register src);
+ };
+ 
+diff --git a/src/hotspot/cpu/riscv/nativeInst_riscv.hpp b/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
+index 35e7cbded7d..2e5c84ee3b8 100644
+--- a/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
++++ b/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
+@@ -41,7 +41,6 @@
+ // - - NativeIllegalInstruction
+ // - - NativeCallTrampolineStub
+ // - - NativeMembar
+-// - - NativeFenceI
+ 
+ // The base class for different kinds of native instruction abstractions.
+ // Provides the primitive operations to manipulate code relative to this.
+@@ -553,12 +552,4 @@ inline NativeMembar *NativeMembar_at(address addr) {
+   return (NativeMembar*)addr;
+ }
+ 
+-class NativeFenceI : public NativeInstruction {
+-public:
+-  static inline int instruction_size() {
+-    // 2 for fence.i + fence
+-    return (UseConservativeFence ? 2 : 1) * NativeInstruction::instruction_size;
+-  }
+-};
+-
+ #endif // CPU_RISCV_NATIVEINST_RISCV_HPP
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index aa434ffa992..f4e9f9ca7da 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -354,10 +354,6 @@ static void patch_callers_callsite(MacroAssembler *masm) {
+   __ la_patchable(t0, RuntimeAddress(CAST_FROM_FN_PTR(address, SharedRuntime::fixup_callers_callsite)), offset);
+   __ jalr(x1, t0, offset);
+ 
+-  // Explicit fence.i required because fixup_callers_callsite may change the code
+-  // stream.
+-  __ safepoint_ifence();
+-
+   __ pop_CPU_state();
+   // restore sp
+   __ leave();
+diff --git a/src/hotspot/os_cpu/linux_riscv/orderAccess_linux_riscv.hpp b/src/hotspot/os_cpu/linux_riscv/orderAccess_linux_riscv.hpp
+index 1c33dc1e87f..2b500376f9b 100644
+--- a/src/hotspot/os_cpu/linux_riscv/orderAccess_linux_riscv.hpp
++++ b/src/hotspot/os_cpu/linux_riscv/orderAccess_linux_riscv.hpp
+@@ -54,10 +54,6 @@ inline void OrderAccess::fence() {
+ }
+ 
+ inline void OrderAccess::cross_modify_fence_impl() {
+-  asm volatile("fence.i" : : : "memory");
+-  if (UseConservativeFence) {
+-    asm volatile("fence ir, ir" : : : "memory");
+-  }
+ }
+ 
+ #endif // OS_CPU_LINUX_RISCV_ORDERACCESS_LINUX_RISCV_HPP

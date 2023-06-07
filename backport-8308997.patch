@@ -1,0 +1,381 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 50fedf1d57a..e9bd609a7bd 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -996,14 +996,13 @@ void LIR_Assembler::emit_opConvert(LIR_OpConvert* op) {
+     case Bytecodes::_i2c:
+       __ zero_extend(dest->as_register(), src->as_register(), 16); break;
+     case Bytecodes::_i2l:
+-      __ addw(dest->as_register_lo(), src->as_register(), zr); break;
++      __ sign_extend(dest->as_register_lo(), src->as_register(), 32); break;
+     case Bytecodes::_i2s:
+       __ sign_extend(dest->as_register(), src->as_register(), 16); break;
+     case Bytecodes::_i2b:
+       __ sign_extend(dest->as_register(), src->as_register(), 8); break;
+     case Bytecodes::_l2i:
+-      _masm->block_comment("FIXME: This coulde be no-op");
+-      __ addw(dest->as_register(), src->as_register_lo(), zr); break;
++      __ sign_extend(dest->as_register(), src->as_register_lo(), 32); break;
+     case Bytecodes::_d2l:
+       __ fcvt_l_d_safe(dest->as_register_lo(), src->as_double_reg()); break;
+     case Bytecodes::_f2i:
+@@ -1316,7 +1315,7 @@ void LIR_Assembler::logic_op(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr
+       int right_const = right->as_jint();
+       if (Assembler::is_simm12(right_const)) {
+         logic_op_imm(Rdst, Rleft, right_const, code);
+-        __ addw(Rdst, Rdst, zr);
++        __ sign_extend(Rdst, Rdst, 32);
+      } else {
+         __ mv(t0, right_const);
+         logic_op_reg32(Rdst, Rleft, t0, code);
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+index 506279ede95..92c128fe93a 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+@@ -79,9 +79,8 @@ void InterpreterMacroAssembler::narrow(Register result) {
+   bind(notChar);
+   sign_extend(result, result, 16);
+ 
+-  // Nothing to do for T_INT
+   bind(done);
+-  addw(result, result, zr);
++  sign_extend(result, result, 32);
+ }
+ 
+ void InterpreterMacroAssembler::jump_to_entry(address entry) {
+@@ -203,7 +202,7 @@ void InterpreterMacroAssembler::get_cache_index_at_bcp(Register index,
+     // plain index.
+     assert(ConstantPool::decode_invokedynamic_index(~123) == 123, "else change next line");
+     xori(index, index, -1);
+-    addw(index, index, zr);
++    sign_extend(index, index, 32);
+   } else if (index_size == sizeof(u1)) {
+     load_unsigned_byte(index, Address(xbcp, bcp_offset));
+   } else {
+@@ -360,7 +359,7 @@ void InterpreterMacroAssembler::push_ptr(Register r) {
+ 
+ void InterpreterMacroAssembler::push_i(Register r) {
+   addi(esp, esp, -wordSize);
+-  addw(r, r, zr); // signed extended
++  sign_extend(r, r, 32);
+   sd(r, Address(esp, 0));
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.hpp b/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
+index eb23acf00cd..c820291e5fe 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
+@@ -148,7 +148,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
+   void load_ptr(int n, Register val);
+   void store_ptr(int n, Register val);
+ 
+-  // Load float value from 'address'. The value is loaded onto the FPU register v0.
++  // Load float value from 'address'. The value is loaded onto the fp register f10.
+   void load_float(Address src);
+   void load_double(Address src);
+ 
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 19d035b8c05..0e7f3ea69cd 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -1558,23 +1558,17 @@ void MacroAssembler::subw(Register Rd, Register Rn, int32_t decrement, Register
+ 
+ void MacroAssembler::andrw(Register Rd, Register Rs1, Register Rs2) {
+   andr(Rd, Rs1, Rs2);
+-  // addw: The result is clipped to 32 bits, then the sign bit is extended,
+-  // and the result is stored in Rd
+-  addw(Rd, Rd, zr);
++  sign_extend(Rd, Rd, 32);
+ }
+ 
+ void MacroAssembler::orrw(Register Rd, Register Rs1, Register Rs2) {
+   orr(Rd, Rs1, Rs2);
+-  // addw: The result is clipped to 32 bits, then the sign bit is extended,
+-  // and the result is stored in Rd
+-  addw(Rd, Rd, zr);
++  sign_extend(Rd, Rd, 32);
+ }
+ 
+ void MacroAssembler::xorrw(Register Rd, Register Rs1, Register Rs2) {
+   xorr(Rd, Rs1, Rs2);
+-  // addw: The result is clipped to 32 bits, then the sign bit is extended,
+-  // and the result is stored in Rd
+-  addw(Rd, Rd, zr);
++  sign_extend(Rd, Rd, 32);
+ }
+ 
+ // Note: load_unsigned_short used to be called load_unsigned_word.
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index ec5bb3709f3..d92031192ab 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -1210,7 +1210,7 @@ public:
+         sign_extend(Rt, Rt, 16);
+         break;
+       case T_INT    :
+-        addw(Rt, Rt, zr);
++        sign_extend(Rt, Rt, 32);
+         break;
+       case T_LONG   : /* nothing to do */        break;
+       case T_VOID   : /* nothing to do */        break;
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index 493d7426ac9..3d59f61c83c 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -7923,7 +7923,7 @@ instruct convI2L_reg_reg(iRegLNoSp dst, iRegIorL2I src)
+   ins_cost(ALU_COST);
+   format %{ "addw  $dst, $src, zr\t#@convI2L_reg_reg" %}
+   ins_encode %{
+-    __ addw(as_Register($dst$$reg), as_Register($src$$reg), zr);
++    __ sign_extend(as_Register($dst$$reg), as_Register($src$$reg), 32);
+   %}
+   ins_pipe(ialu_reg);
+ %}
+@@ -7935,7 +7935,7 @@ instruct convL2I_reg(iRegINoSp dst, iRegL src) %{
+   format %{ "addw  $dst, $src, zr\t#@convL2I_reg" %}
+ 
+   ins_encode %{
+-    __ addw(as_Register($dst$$reg), as_Register($src$$reg), zr);
++    __ sign_extend(as_Register($dst$$reg), as_Register($src$$reg), 32);
+   %}
+ 
+   ins_pipe(ialu_reg);
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index 4937c40a2a7..d4e0e464b62 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -1641,7 +1641,6 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
+       __ la_patchable(t0, target, offset);
+       __ lbu(t0, Address(t0, offset));
+     });
+-    __ addw(t0, t0, zr);
+     __ bnez(t0, dtrace_method_entry);
+     __ bind(dtrace_method_entry_done);
+   }
+@@ -2427,7 +2426,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+ #endif
+   // compiler left unloaded_class_index in j_rarg0 move to where the
+   // runtime expects it.
+-  __ addiw(c_rarg1, j_rarg0, 0);
++  __ sign_extend(c_rarg1, j_rarg0, 32);
+ 
+   // we need to set the past SP to the stack pointer of the stub frame
+   // and the pc to the address where this runtime call will return
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index 40418816586..adebc1f3964 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -1784,17 +1784,15 @@ class StubGenerator: public StubCodeGenerator {
+     __ beqz(src, L_failed);
+ 
+     // if [src_pos < 0] then return -1
+-    // i.e. sign bit set
+-    __ test_bit(t0, src_pos, 31);
+-    __ bnez(t0, L_failed);
++    __ sign_extend(t0, src_pos, 32);
++    __ bltz(t0, L_failed);
+ 
+     // if [dst == NULL] then return -1
+     __ beqz(dst, L_failed);
+ 
+     // if [dst_pos < 0] then return -1
+-    // i.e. sign bit set
+-    __ test_bit(t0, dst_pos, 31);
+-    __ bnez(t0, L_failed);
++    __ sign_extend(t0, dst_pos, 32);
++    __ bltz(t0, L_failed);
+ 
+     // registers used as temp
+     const Register scratch_length    = x28; // elements count to copy
+@@ -1802,10 +1800,8 @@ class StubGenerator: public StubCodeGenerator {
+     const Register lh                = x30; // layout helper
+ 
+     // if [length < 0] then return -1
+-    __ addw(scratch_length, length, zr);    // length (elements count, 32-bits value)
+-    // i.e. sign bit set
+-    __ test_bit(t0, scratch_length, 31);
+-    __ bnez(t0, L_failed);
++    __ sign_extend(scratch_length, length, 32);    // length (elements count, 32-bits value)
++    __ bltz(scratch_length, L_failed);
+ 
+     __ load_klass(scratch_src_klass, src);
+ #ifdef ASSERT
+@@ -1844,8 +1840,7 @@ class StubGenerator: public StubCodeGenerator {
+ 
+     // if [src->is_Array() != NULL] then return -1
+     // i.e. (lh >= 0)
+-    __ test_bit(t0, lh, 31);
+-    __ beqz(t0, L_failed);
++    __ bgez(lh, L_failed);
+ 
+     // At this point, it is known to be a typeArray (array_tag 0x3).
+ #ifdef ASSERT
+@@ -1870,7 +1865,7 @@ class StubGenerator: public StubCodeGenerator {
+     //
+ 
+     const Register t0_offset = t0;    // array offset
+-    const Register x22_elsize = lh;   // element size
++    const Register x30_elsize = lh;   // element size
+ 
+     // Get array_header_in_bytes()
+     int lh_header_size_width = exact_log2(Klass::_lh_header_size_mask + 1);
+@@ -1895,27 +1890,27 @@ class StubGenerator: public StubCodeGenerator {
+     // The possible values of elsize are 0-3, i.e. exact_log2(element
+     // size in bytes).  We do a simple bitwise binary search.
+   __ BIND(L_copy_bytes);
+-    __ test_bit(t0, x22_elsize, 1);
++    __ test_bit(t0, x30_elsize, 1);
+     __ bnez(t0, L_copy_ints);
+-    __ test_bit(t0, x22_elsize, 0);
++    __ test_bit(t0, x30_elsize, 0);
+     __ bnez(t0, L_copy_shorts);
+     __ add(from, src, src_pos); // src_addr
+     __ add(to, dst, dst_pos); // dst_addr
+-    __ addw(count, scratch_length, zr); // length
++    __ sign_extend(count, scratch_length, 32); // length
+     __ j(RuntimeAddress(byte_copy_entry));
+ 
+   __ BIND(L_copy_shorts);
+     __ shadd(from, src_pos, src, t0, 1); // src_addr
+     __ shadd(to, dst_pos, dst, t0, 1); // dst_addr
+-    __ addw(count, scratch_length, zr); // length
++    __ sign_extend(count, scratch_length, 32); // length
+     __ j(RuntimeAddress(short_copy_entry));
+ 
+   __ BIND(L_copy_ints);
+-    __ test_bit(t0, x22_elsize, 0);
++    __ test_bit(t0, x30_elsize, 0);
+     __ bnez(t0, L_copy_longs);
+     __ shadd(from, src_pos, src, t0, 2); // src_addr
+     __ shadd(to, dst_pos, dst, t0, 2); // dst_addr
+-    __ addw(count, scratch_length, zr); // length
++    __ sign_extend(count, scratch_length, 32); // length
+     __ j(RuntimeAddress(int_copy_entry));
+ 
+   __ BIND(L_copy_longs);
+@@ -1923,10 +1918,10 @@ class StubGenerator: public StubCodeGenerator {
+     {
+       BLOCK_COMMENT("assert long copy {");
+       Label L;
+-      __ andi(lh, lh, Klass::_lh_log2_element_size_mask); // lh -> x22_elsize
+-      __ addw(lh, lh, zr);
++      __ andi(lh, lh, Klass::_lh_log2_element_size_mask); // lh -> x30_elsize
++      __ sign_extend(lh, lh, 32);
+       __ mv(t0, LogBytesPerLong);
+-      __ beq(x22_elsize, t0, L);
++      __ beq(x30_elsize, t0, L);
+       __ stop("must be long copy, but elsize is wrong");
+       __ bind(L);
+       BLOCK_COMMENT("} assert long copy done");
+@@ -1934,7 +1929,7 @@ class StubGenerator: public StubCodeGenerator {
+ #endif
+     __ shadd(from, src_pos, src, t0, 3); // src_addr
+     __ shadd(to, dst_pos, dst, t0, 3); // dst_addr
+-    __ addw(count, scratch_length, zr); // length
++    __ sign_extend(count, scratch_length, 32); // length
+     __ j(RuntimeAddress(long_copy_entry));
+ 
+     // ObjArrayKlass
+@@ -1954,7 +1949,7 @@ class StubGenerator: public StubCodeGenerator {
+     __ add(from, from, arrayOopDesc::base_offset_in_bytes(T_OBJECT));
+     __ shadd(to, dst_pos, dst, t0, LogBytesPerHeapOop);
+     __ add(to, to, arrayOopDesc::base_offset_in_bytes(T_OBJECT));
+-    __ addw(count, scratch_length, zr); // length
++    __ sign_extend(count, scratch_length, 32); // length
+   __ BIND(L_plain_copy);
+     __ j(RuntimeAddress(oop_copy_entry));
+ 
+@@ -1977,7 +1972,7 @@ class StubGenerator: public StubCodeGenerator {
+       __ add(from, from, arrayOopDesc::base_offset_in_bytes(T_OBJECT));
+       __ shadd(to, dst_pos, dst, t0, LogBytesPerHeapOop);
+       __ add(to, to, arrayOopDesc::base_offset_in_bytes(T_OBJECT));
+-      __ addw(count, length, zr);           // length (reloaded)
++      __ sign_extend(count, length, 32);      // length (reloaded)
+       const Register sco_temp = c_rarg3;      // this register is free now
+       assert_different_registers(from, to, count, sco_temp,
+                                  dst_klass, scratch_src_klass);
+@@ -2839,7 +2834,7 @@ class StubGenerator: public StubCodeGenerator {
+     __ andi(result, result, haystack_isL ? -8 : -4);
+     __ slli(tmp, match_mask, haystack_chr_shift);
+     __ sub(haystack, haystack, tmp);
+-    __ addw(haystack_len, haystack_len, zr);
++    __ sign_extend(haystack_len, haystack_len, 32);
+     __ j(L_LOOP_PROCEED);
+ 
+     __ align(OptoLoopAlignment);
+diff --git a/src/hotspot/cpu/riscv/templateTable_riscv.cpp b/src/hotspot/cpu/riscv/templateTable_riscv.cpp
+index 12d611eacf5..f69a01098aa 100644
+--- a/src/hotspot/cpu/riscv/templateTable_riscv.cpp
++++ b/src/hotspot/cpu/riscv/templateTable_riscv.cpp
+@@ -724,7 +724,7 @@ void TemplateTable::index_check(Register array, Register index)
+     __ mv(x11, index);
+   }
+   Label ok;
+-  __ addw(index, index, zr);
++  __ sign_extend(index, index, 32);
+   __ bltu(index, length, ok);
+   __ mv(x13, array);
+   __ mv(t0, Interpreter::_throw_ArrayIndexOutOfBoundsException_entry);
+@@ -743,7 +743,7 @@ void TemplateTable::iaload()
+   __ add(x11, x11, arrayOopDesc::base_offset_in_bytes(T_INT) >> 2);
+   __ shadd(x10, x11, x10, t0, 2);
+   __ access_load_at(T_INT, IN_HEAP | IS_ARRAY, x10, Address(x10), noreg, noreg);
+-  __ addw(x10, x10, zr); // signed extended
++  __ sign_extend(x10, x10, 32);
+ }
+ 
+ void TemplateTable::laload()
+@@ -1620,7 +1620,7 @@ void TemplateTable::convert()
+       __ sign_extend(x10, x10, 16);
+       break;
+     case Bytecodes::_l2i:
+-      __ addw(x10, x10, zr);
++      __ sign_extend(x10, x10, 32);
+       break;
+     case Bytecodes::_l2f:
+       __ fcvt_s_l(f10, x10);
+@@ -1847,7 +1847,7 @@ void TemplateTable::if_0cmp(Condition cc)
+   // assume branch is more often taken than not (loops use backward branches)
+   Label not_taken;
+ 
+-  __ addw(x10, x10, zr);
++  __ sign_extend(x10, x10, 32);
+   switch (cc) {
+     case equal:
+       __ bnez(x10, not_taken);
+@@ -1882,7 +1882,7 @@ void TemplateTable::if_icmp(Condition cc)
+   // assume branch is more often taken than not (loops use backward branches)
+   Label not_taken;
+   __ pop_i(x11);
+-  __ addw(x10, x10, zr);
++  __ sign_extend(x10, x10, 32);
+   switch (cc) {
+     case equal:
+       __ bne(x11, x10, not_taken);
+@@ -2465,7 +2465,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static, RewriteContr
+   __ bnez(t0, notInt);
+   // itos
+   __ access_load_at(T_INT, IN_HEAP, x10, field, noreg, noreg);
+-  __ addw(x10, x10, zr); // signed extended
++  __ sign_extend(x10, x10, 32);
+   __ push(itos);
+   // Rewrite bytecode to be faster
+   if (rc == may_rewrite) {
+@@ -3070,7 +3070,7 @@ void TemplateTable::fast_accessfield(TosState state)
+       break;
+     case Bytecodes::_fast_igetfield:
+       __ access_load_at(T_INT, IN_HEAP, x10, field, noreg, noreg);
+-      __ addw(x10, x10, zr); // signed extended
++      __ sign_extend(x10, x10, 32);
+       break;
+     case Bytecodes::_fast_bgetfield:
+       __ access_load_at(T_BYTE, IN_HEAP, x10, field, noreg, noreg);
+@@ -3118,7 +3118,7 @@ void TemplateTable::fast_xaccess(TosState state)
+     case itos:
+       __ add(x10, x10, x11);
+       __ access_load_at(T_INT, IN_HEAP, x10, Address(x10, 0), noreg, noreg);
+-      __ addw(x10, x10, zr); // signed extended
++      __ sign_extend(x10, x10, 32);
+       break;
+     case atos:
+       __ add(x10, x10, x11);

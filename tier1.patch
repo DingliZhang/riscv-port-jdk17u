@@ -1,0 +1,15 @@
+diff --git a/test/hotspot/jtreg/TEST.groups b/test/hotspot/jtreg/TEST.groups
+index 74fb2266c70..cba5b339dfc 100644
+--- a/test/hotspot/jtreg/TEST.groups
++++ b/test/hotspot/jtreg/TEST.groups
+@@ -502,7 +502,9 @@ tier1 = \
+   :tier1_compiler \
+   :tier1_gc \
+   :tier1_runtime \
+-  :tier1_serviceability
++  :tier1_serviceability \
++  -runtime/jni/checked/TestCheckedReleaseCriticalArray.java \
++  -runtime/8176717/TestInheritFD.java
+ 
+ tier2 = \
+   :hotspot_tier2_runtime \

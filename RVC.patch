@@ -1,0 +1,166 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 47c7833aa27..81937a3ae42 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1369,7 +1369,7 @@ void LIR_Assembler::align_call(LIR_Code code) {
+   // With RVC a call instruction may get 2-byte aligned.
+   // The address of the call instruction needs to be 4-byte aligned to
+   // ensure that it does not span a cache line so that it can be patched.
+-  __ align(4);
++  __ align(NativeInstruction::instruction_size);
+ }
+ 
+ void LIR_Assembler::call(LIR_OpJavaCall* op, relocInfo::relocType rtype) {
+@@ -1392,7 +1392,7 @@ void LIR_Assembler::ic_call(LIR_OpJavaCall* op) {
+ 
+ void LIR_Assembler::emit_static_call_stub() {
+   address call_pc = __ pc();
+-  assert((__ offset() % 4) == 0, "bad alignment");
++  MacroAssembler::assert_alignment(call_pc);
+   address stub = __ start_a_stub(call_stub_size());
+   if (stub == NULL) {
+     bailout("static call stub overflow");
+diff --git a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+index 16b8a49333b..aba9cb293f5 100644
+--- a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+@@ -341,7 +341,7 @@ void C1_MacroAssembler::verified_entry(bool breakAtEntry) {
+   // first instruction with a jump. For this action to be legal we
+   // must ensure that this first instruction is a J, JAL or NOP.
+   // Make it a NOP.
+-
++  assert_alignment(pc());
+   nop();
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.cpp b/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.cpp
+index 3c115a2ea02..70a511fa010 100644
+--- a/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.cpp
+@@ -259,7 +259,7 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm) {
+ 
+   __ bind(guard);
+ 
+-  assert(__ offset() % 4 == 0, "bad alignment");
++  MacroAssembler::assert_alignment(__ pc());
+   __ emit_int32(0); // nmethod guard value. Skipped over in common case.
+ 
+   __ bind(skip);
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 5ffc7dac025..86f830929ee 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -3115,6 +3115,12 @@ address MacroAssembler::trampoline_call(Address entry, CodeBuffer* cbuf) {
+   }
+ 
+   if (cbuf != NULL) { cbuf->set_insts_mark(); }
++  address call_pc = pc();
++#ifdef ASSERT
++  if (entry.rspec().type() != relocInfo::runtime_call_type) {
++    assert_alignment(call_pc);
++  }
++#endif
+   relocate(entry.rspec());
+   if (!far_branches()) {
+     jal(entry.target());
+@@ -3123,7 +3129,7 @@ address MacroAssembler::trampoline_call(Address entry, CodeBuffer* cbuf) {
+   }
+   // just need to return a non-null address
+   postcond(pc() != badAddress);
+-  return pc();
++  return call_pc;
+ }
+ 
+ address MacroAssembler::ic_call(address entry, jint method_index) {
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index fe428ad5549..eabcca8ff87 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -29,6 +29,7 @@
+ 
+ #include "asm/assembler.hpp"
+ #include "metaprogramming/enableIf.hpp"
++#include "nativeInst_riscv.hpp"
+ #include "oops/compressedOops.hpp"
+ #include "utilities/powerOfTwo.hpp"
+ 
+@@ -51,6 +52,9 @@ class MacroAssembler: public Assembler {
+ 
+   // Alignment
+   void align(int modulus, int extra_offset = 0);
++  static inline void assert_alignment(address pc, int alignment = NativeInstruction::instruction_size) {
++    assert(is_aligned(pc, alignment), "bad alignment");
++  }
+ 
+   // Stack frame creation/removal
+   // Note that SP must be updated to the right place before saving/restoring RA and FP
+diff --git a/src/hotspot/cpu/riscv/nativeInst_riscv.cpp b/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
+index 0d695de606f..392fab68b17 100644
+--- a/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
++++ b/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
+@@ -266,6 +266,13 @@ void NativeJump::verify() { }
+ 
+ 
+ void NativeJump::check_verified_entry_alignment(address entry, address verified_entry) {
++  // Patching to not_entrant can happen while activations of the method are
++  // in use. The patching in that instance must happen only when certain
++  // alignment restrictions are true. These guarantees check those
++  // conditions.
++
++  // Must be 4 bytes aligned
++  MacroAssembler::assert_alignment(verified_entry);
+ }
+ 
+ 
+@@ -356,6 +363,8 @@ void NativeJump::patch_verified_entry(address entry, address verified_entry, add
+          nativeInstruction_at(verified_entry)->is_sigill_zombie_not_entrant(),
+          "riscv cannot replace non-jump with jump");
+ 
++  check_verified_entry_alignment(entry, verified_entry);
++
+   // Patch this nmethod atomically.
+   if (Assembler::reachable_from_branch_at(verified_entry, dest)) {
+     ptrdiff_t offset = dest - verified_entry;
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index 530c8c3dd44..38a7899a081 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -1323,6 +1323,7 @@ void MachPrologNode::emit(CodeBuffer &cbuf, PhaseRegAlloc *ra_) const {
+ 
+   // insert a nop at the start of the prolog so we can patch in a
+   // branch if we need to invalidate the method later
++  MacroAssembler::assert_alignment(__ pc());
+   __ nop();
+ 
+   assert_cond(C != NULL);
+@@ -1723,6 +1724,10 @@ void MachUEPNode::emit(CodeBuffer& cbuf, PhaseRegAlloc* ra_) const
+   __ cmp_klass(j_rarg0, t1, t0, skip);
+   __ far_jump(RuntimeAddress(SharedRuntime::get_ic_miss_stub()));
+   __ bind(skip);
++
++  // These NOPs are critical so that verified entry point is properly
++  // 4 bytes aligned for patching by NativeJump::patch_verified_entry()
++  __ align(NativeInstruction::instruction_size);
+ }
+ 
+ uint MachUEPNode::size(PhaseRegAlloc* ra_) const
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index 5564452d0f3..cf18a5e3f8d 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -1211,6 +1211,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
+     int vep_offset = ((intptr_t)__ pc()) - start;
+ 
+     // First instruction must be a nop as it may need to be patched on deoptimisation
++    MacroAssembler::assert_alignment(__ pc());
+     __ nop();
+     gen_special_dispatch(masm,
+                          method,
+@@ -1430,6 +1431,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
+ 
+   // If we have to make this method not-entrant we'll overwrite its
+   // first instruction with a jump.
++  MacroAssembler::assert_alignment(__ pc());
+   __ nop();
+ 
+   if (VM_Version::supports_fast_class_init_checks() && method->needs_clinit_barrier()) {

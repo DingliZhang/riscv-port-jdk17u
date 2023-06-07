@@ -1,0 +1,1013 @@
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.hpp b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+index 9103e725039..6eb4228caa3 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+@@ -28,7 +28,7 @@
+ #define CPU_RISCV_ASSEMBLER_RISCV_HPP
+ 
+ #include "asm/register.hpp"
+-#include "assembler_riscv.inline.hpp"
++#include "code/codeCache.hpp"
+ #include "metaprogramming/enableIf.hpp"
+ 
+ #define XLEN 64
+@@ -452,7 +452,7 @@ public:
+ // Load/store register (all modes)
+ #define INSN(NAME, op, funct3)                                                                     \
+   void NAME(Register Rd, Register Rs, const int32_t offset) {                                      \
+-    guarantee(is_offset_in_range(offset, 12), "offset is invalid.");                               \
++    guarantee(is_simm12(offset), "offset is invalid.");                                            \
+     unsigned insn = 0;                                                                             \
+     int32_t val = offset & 0xfff;                                                                  \
+     patch((address)&insn, 6, 0, op);                                                               \
+@@ -475,7 +475,7 @@ public:
+ 
+ #define INSN(NAME, op, funct3)                                                                     \
+   void NAME(FloatRegister Rd, Register Rs, const int32_t offset) {                                 \
+-    guarantee(is_offset_in_range(offset, 12), "offset is invalid.");                               \
++    guarantee(is_simm12(offset), "offset is invalid.");                                            \
+     unsigned insn = 0;                                                                             \
+     uint32_t val = offset & 0xfff;                                                                 \
+     patch((address)&insn, 6, 0, op);                                                               \
+@@ -493,7 +493,7 @@ public:
+ 
+ #define INSN(NAME, op, funct3)                                                                           \
+   void NAME(Register Rs1, Register Rs2, const int64_t offset) {                                          \
+-    guarantee(is_imm_in_range(offset, 12, 1), "offset is invalid.");                                     \
++    guarantee(is_simm13(offset) && ((offset % 2) == 0), "offset is invalid.");                           \
+     unsigned insn = 0;                                                                                   \
+     uint32_t val  = offset & 0x1fff;                                                                     \
+     uint32_t val11 = (val >> 11) & 0x1;                                                                  \
+@@ -522,7 +522,7 @@ public:
+ 
+ #define INSN(NAME, REGISTER, op, funct3)                                                                    \
+   void NAME(REGISTER Rs1, Register Rs2, const int32_t offset) {                                             \
+-    guarantee(is_offset_in_range(offset, 12), "offset is invalid.");                                        \
++    guarantee(is_simm12(offset), "offset is invalid.");                                                     \
+     unsigned insn = 0;                                                                                      \
+     uint32_t val  = offset & 0xfff;                                                                         \
+     uint32_t low  = val & 0x1f;                                                                             \
+@@ -547,7 +547,7 @@ public:
+ 
+ #define INSN(NAME, op, funct3)                                                        \
+   void NAME(Register Rd, const uint32_t csr, Register Rs1) {                          \
+-    guarantee(is_unsigned_imm_in_range(csr, 12, 0), "csr is invalid");                \
++    guarantee(is_uimm12(csr), "csr is invalid");                                      \
+     unsigned insn = 0;                                                                \
+     patch((address)&insn, 6, 0, op);                                                  \
+     patch((address)&insn, 14, 12, funct3);                                            \
+@@ -565,8 +565,8 @@ public:
+ 
+ #define INSN(NAME, op, funct3)                                                        \
+   void NAME(Register Rd, const uint32_t csr, const uint32_t uimm) {                   \
+-    guarantee(is_unsigned_imm_in_range(csr, 12, 0), "csr is invalid");                \
+-    guarantee(is_unsigned_imm_in_range(uimm, 5, 0), "uimm is invalid");               \
++    guarantee(is_uimm12(csr), "csr is invalid");                                      \
++    guarantee(is_uimm5(uimm), "uimm is invalid");                                     \
+     unsigned insn = 0;                                                                \
+     uint32_t val  = uimm & 0x1f;                                                      \
+     patch((address)&insn, 6, 0, op);                                                  \
+@@ -585,7 +585,7 @@ public:
+ 
+ #define INSN(NAME, op)                                                                \
+   void NAME(Register Rd, const int32_t offset) {                                      \
+-    guarantee(is_imm_in_range(offset, 20, 1), "offset is invalid.");                  \
++    guarantee(is_simm21(offset) && ((offset % 2) == 0), "offset is invalid.");        \
+     unsigned insn = 0;                                                                \
+     patch((address)&insn, 6, 0, op);                                                  \
+     patch_reg((address)&insn, 7, Rd);                                                 \
+@@ -602,7 +602,7 @@ public:
+ 
+ #define INSN(NAME, op, funct)                                                         \
+   void NAME(Register Rd, Register Rs, const int32_t offset) {                         \
+-    guarantee(is_offset_in_range(offset, 12), "offset is invalid.");                  \
++    guarantee(is_simm12(offset), "offset is invalid.");                               \
+     unsigned insn = 0;                                                                \
+     patch((address)&insn, 6, 0, op);                                                  \
+     patch_reg((address)&insn, 7, Rd);                                                 \
+@@ -747,7 +747,7 @@ enum operand_size { int8, int16, int32, uint32, int64 };
+ // Immediate Instruction
+ #define INSN(NAME, op, funct3)                                                              \
+   void NAME(Register Rd, Register Rs1, int32_t imm) {                                       \
+-    guarantee(is_imm_in_range(imm, 12, 0), "Immediate is out of validity");                 \
++    guarantee(is_simm12(imm), "Immediate is out of validity");                              \
+     unsigned insn = 0;                                                                      \
+     patch((address)&insn, 6, 0, op);                                                        \
+     patch((address)&insn, 14, 12, funct3);                                                  \
+@@ -768,7 +768,7 @@ enum operand_size { int8, int16, int32, uint32, int64 };
+ 
+ #define INSN(NAME, op, funct3)                                                              \
+   void NAME(Register Rd, Register Rs1, uint32_t imm) {                                      \
+-    guarantee(is_unsigned_imm_in_range(imm, 12, 0), "Immediate is out of validity");        \
++    guarantee(is_uimm12(imm), "Immediate is out of validity");                              \
+     unsigned insn = 0;                                                                      \
+     patch((address)&insn,6, 0,  op);                                                        \
+     patch((address)&insn, 14, 12, funct3);                                                  \
+@@ -1094,7 +1094,7 @@ static Assembler::SEW elemtype_to_sew(BasicType etype) {
+   void NAME(Register Rd, uint32_t imm, SEW sew, LMUL lmul = m1,           \
+             VMA vma = mu, VTA vta = tu, bool vill = false) {              \
+     unsigned insn = 0;                                                    \
+-    guarantee(is_unsigned_imm_in_range(imm, 5, 0), "imm is invalid");     \
++    guarantee(is_uimm5(imm), "imm is invalid");                           \
+     patch((address)&insn, 6, 0, op);                                      \
+     patch((address)&insn, 14, 12, funct3);                                \
+     patch((address)&insn, 19, 15, imm);                                   \
+@@ -1224,7 +1224,7 @@ enum VectorMask {
+ // r_vm
+ #define INSN(NAME, op, funct3, funct6)                                                             \
+   void NAME(VectorRegister Vd, VectorRegister Vs2, uint32_t imm, VectorMask vm = unmasked) {       \
+-    guarantee(is_unsigned_imm_in_range(imm, 5, 0), "imm is invalid");                              \
++    guarantee(is_uimm5(imm), "imm is invalid");                                                    \
+     patch_VArith(op, Vd, funct3, (uint32_t)(imm & 0x1f), Vs2, vm, funct6);                         \
+   }
+ 
+@@ -1468,7 +1468,7 @@ enum VectorMask {
+ 
+ #define INSN(NAME, op, funct3, funct6)                                                             \
+   void NAME(VectorRegister Vd, VectorRegister Vs2, int32_t imm, VectorMask vm = unmasked) {        \
+-    guarantee(is_imm_in_range(imm, 5, 0), "imm is invalid");                                       \
++    guarantee(is_simm5(imm), "imm is invalid");                                                    \
+     patch_VArith(op, Vd, funct3, (uint32_t)(imm & 0x1f), Vs2, vm, funct6);                         \
+   }
+ 
+@@ -1508,7 +1508,7 @@ enum VectorMask {
+ 
+ #define INSN(NAME, op, funct3, Vs2, vm, funct6)                            \
+   void NAME(VectorRegister Vd, int32_t imm) {                              \
+-    guarantee(is_imm_in_range(imm, 5, 0), "imm is invalid");               \
++    guarantee(is_simm5(imm), "imm is invalid");                            \
+     patch_VArith(op, Vd, funct3, (uint32_t)(imm & 0x1f), Vs2, vm, funct6); \
+   }
+ 
+@@ -1595,7 +1595,7 @@ enum Nf {
+ 
+ #define INSN(NAME, op, lumop, vm, mop, nf)                                           \
+   void NAME(VectorRegister Vd, Register Rs1, uint32_t width = 0, bool mew = false) { \
+-    guarantee(is_unsigned_imm_in_range(width, 3, 0), "width is invalid");            \
++    guarantee(is_uimm3(width), "width is invalid");                                  \
+     patch_VLdSt(op, Vd, width, Rs1, lumop, vm, mop, mew, nf);                        \
+   }
+ 
+@@ -1915,7 +1915,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd_Rs1, int32_t imm) {                                                  \
+-    assert_cond(is_imm_in_range(imm, 6, 0));                                                 \
++    assert_cond(is_simm6(imm));                                                              \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+     c_patch((address)&insn, 6, 2, (imm & right_n_bits(5)));                                  \
+@@ -1932,7 +1932,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(int32_t imm) {                                                                   \
+-    assert_cond(is_imm_in_range(imm, 10, 0));                                                \
++    assert_cond(is_simm10(imm));                                                             \
+     assert_cond((imm & 0b1111) == 0);                                                        \
+     assert_cond(imm != 0);                                                                   \
+     uint16_t insn = 0;                                                                       \
+@@ -1953,7 +1953,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd, uint32_t uimm) {                                                    \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 10, 0));                                      \
++    assert_cond(is_uimm10(uimm));                                                            \
+     assert_cond((uimm & 0b11) == 0);                                                         \
+     assert_cond(uimm != 0);                                                                  \
+     uint16_t insn = 0;                                                                       \
+@@ -1973,7 +1973,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd_Rs1, uint32_t shamt) {                                               \
+-    assert_cond(is_unsigned_imm_in_range(shamt, 6, 0));                                      \
++    assert_cond(is_uimm6(shamt));                                                            \
+     assert_cond(shamt != 0);                                                                 \
+     assert_cond(Rd_Rs1 != x0);                                                               \
+     uint16_t insn = 0;                                                                       \
+@@ -1991,7 +1991,7 @@ public:
+ 
+ #define INSN(NAME, funct3, funct2, op)                                                       \
+   void NAME(Register Rd_Rs1, uint32_t shamt) {                                               \
+-    assert_cond(is_unsigned_imm_in_range(shamt, 6, 0));                                      \
++    assert_cond(is_uimm6(shamt));                                                            \
+     assert_cond(shamt != 0);                                                                 \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2010,7 +2010,7 @@ public:
+ 
+ #define INSN(NAME, funct3, funct2, op)                                                       \
+   void NAME(Register Rd_Rs1, int32_t imm) {                                                  \
+-    assert_cond(is_imm_in_range(imm, 6, 0));                                                 \
++    assert_cond(is_simm6(imm));                                                              \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+     c_patch((address)&insn, 6, 2, (imm & right_n_bits(5)));                                  \
+@@ -2100,7 +2100,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(int32_t offset) {                                                                \
+-    assert_cond(is_imm_in_range(offset, 11, 1));                                             \
++    assert(is_simm12(offset) && ((offset % 2) == 0), "invalid encoding");                    \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+     c_patch((address)&insn, 2, 2, (offset & nth_bit(5)) >> 5);                               \
+@@ -2117,7 +2117,7 @@ public:
+   void NAME(address dest) {                                                                  \
+     assert_cond(dest != NULL);                                                               \
+     int64_t distance = dest - pc();                                                          \
+-    assert_cond(is_imm_in_range(distance, 11, 1));                                           \
++    assert(is_simm12(distance) && ((distance % 2) == 0), "invalid encoding");                \
+     c_j(distance);                                                                           \
+   }                                                                                          \
+   void NAME(Label &L) {                                                                      \
+@@ -2130,7 +2130,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rs1, int32_t imm) {                                                     \
+-    assert_cond(is_imm_in_range(imm, 8, 1));                                                 \
++    assert(is_simm9(imm) && ((imm % 2) == 0), "invalid encoding");                           \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+     c_patch((address)&insn, 2, 2, (imm & nth_bit(5)) >> 5);                                  \
+@@ -2145,7 +2145,7 @@ public:
+   void NAME(Register Rs1, address dest) {                                                    \
+     assert_cond(dest != NULL);                                                               \
+     int64_t distance = dest - pc();                                                          \
+-    assert_cond(is_imm_in_range(distance, 8, 1));                                            \
++    assert(is_simm9(distance) && ((distance % 2) == 0), "invalid encoding");                 \
+     NAME(Rs1, distance);                                                                     \
+   }                                                                                          \
+   void NAME(Register Rs1, Label &L) {                                                        \
+@@ -2159,7 +2159,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd, int32_t imm) {                                                      \
+-    assert_cond(is_imm_in_range(imm, 18, 0));                                                \
++    assert_cond(is_simm18(imm));                                                             \
+     assert_cond((imm & 0xfff) == 0);                                                         \
+     assert_cond(imm != 0);                                                                   \
+     assert_cond(Rd != x0 && Rd != x2);                                                       \
+@@ -2178,7 +2178,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd, int32_t imm) {                                                      \
+-    assert_cond(is_imm_in_range(imm, 6, 0));                                                 \
++    assert_cond(is_simm6(imm));                                                              \
+     assert_cond(Rd != x0);                                                                   \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2195,7 +2195,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd, uint32_t uimm) {                                                    \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 9, 0));                                       \
++    assert_cond(is_uimm9(uimm));                                                             \
+     assert_cond((uimm & 0b111) == 0);                                                        \
+     assert_cond(Rd != x0);                                                                   \
+     uint16_t insn = 0;                                                                       \
+@@ -2214,7 +2214,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(FloatRegister Rd, uint32_t uimm) {                                               \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 9, 0));                                       \
++    assert_cond(is_uimm9(uimm));                                                             \
+     assert_cond((uimm & 0b111) == 0);                                                        \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2232,7 +2232,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op, REGISTER_TYPE)                                                \
+   void NAME(REGISTER_TYPE Rd_Rs2, Register Rs1, uint32_t uimm) {                             \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 8, 0));                                       \
++    assert_cond(is_uimm8(uimm));                                                             \
+     assert_cond((uimm & 0b111) == 0);                                                        \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2253,7 +2253,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op, REGISTER_TYPE)                                                \
+   void NAME(REGISTER_TYPE Rs2, uint32_t uimm) {                                              \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 9, 0));                                       \
++    assert_cond(is_uimm9(uimm));                                                             \
+     assert_cond((uimm & 0b111) == 0);                                                        \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2271,7 +2271,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rs2, uint32_t uimm) {                                                   \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 8, 0));                                       \
++    assert_cond(is_uimm8(uimm));                                                             \
+     assert_cond((uimm & 0b11) == 0);                                                         \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2288,7 +2288,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd, uint32_t uimm) {                                                    \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 8, 0));                                       \
++    assert_cond(is_uimm8(uimm));                                                             \
+     assert_cond((uimm & 0b11) == 0);                                                         \
+     assert_cond(Rd != x0);                                                                   \
+     uint16_t insn = 0;                                                                       \
+@@ -2307,7 +2307,7 @@ public:
+ 
+ #define INSN(NAME, funct3, op)                                                               \
+   void NAME(Register Rd_Rs2, Register Rs1, uint32_t uimm) {                                  \
+-    assert_cond(is_unsigned_imm_in_range(uimm, 7, 0));                                       \
++    assert_cond(is_uimm7(uimm));                                                             \
+     assert_cond((uimm & 0b11) == 0);                                                         \
+     uint16_t insn = 0;                                                                       \
+     c_patch((address)&insn, 1, 0, op);                                                       \
+@@ -2405,7 +2405,7 @@ private:
+ #define FUNC(NAME, funct3, bits)                                                             \
+   bool NAME(Register rs1, Register rd_rs2, int32_t imm12, bool ld) {                         \
+     return rs1 == sp &&                                                                      \
+-      is_unsigned_imm_in_range(imm12, bits, 0) &&                                            \
++      is_uimm(imm12, bits) &&                                                                \
+       (intx(imm12) & funct3) == 0x0 &&                                                       \
+       (!ld || rd_rs2 != x0);                                                                 \
+   }                                                                                          \
+@@ -2418,7 +2418,7 @@ private:
+ #define FUNC(NAME, funct3, bits)                                                             \
+   bool NAME(Register rs1, int32_t imm12) {                                                   \
+     return rs1 == sp &&                                                                      \
+-      is_unsigned_imm_in_range(imm12, bits, 0) &&                                            \
++      is_uimm(imm12, bits) &&                                                                \
+       (intx(imm12) & funct3) == 0x0;                                                         \
+   }                                                                                          \
+ 
+@@ -2430,7 +2430,7 @@ private:
+   bool NAME(Register rs1, REG_TYPE rd_rs2, int32_t imm12) {                                  \
+     return rs1->is_compressed_valid() &&                                                     \
+       rd_rs2->is_compressed_valid() &&                                                       \
+-      is_unsigned_imm_in_range(imm12, bits, 0) &&                                            \
++      is_uimm(imm12, bits) &&                                                                \
+       (intx(imm12) & funct3) == 0x0;                                                         \
+   }                                                                                          \
+ 
+@@ -2613,17 +2613,17 @@ public:
+   void NAME(Register Rd, Register Rs1, int32_t imm) {                                        \
+     /* addi -> c.addi/c.nop/c.mv/c.addi16sp/c.addi4spn */                                    \
+     if (do_compress()) {                                                                     \
+-      if (Rd == Rs1 && is_imm_in_range(imm, 6, 0)) {                                         \
++      if (Rd == Rs1 && is_simm6(imm)) {                                                      \
+         c_addi(Rd, imm);                                                                     \
+         return;                                                                              \
+       } else if (imm == 0 && Rd != x0 && Rs1 != x0) {                                        \
+         c_mv(Rd, Rs1);                                                                       \
+         return;                                                                              \
+       } else if (Rs1 == sp && imm != 0) {                                                    \
+-        if (Rd == Rs1 && (imm & 0b1111) == 0x0 && is_imm_in_range(imm, 10, 0)) {             \
++        if (Rd == Rs1 && (imm & 0b1111) == 0x0 && is_simm10(imm)) {                          \
+           c_addi16sp(imm);                                                                   \
+           return;                                                                            \
+-        } else if (Rd->is_compressed_valid() && (imm & 0b11) == 0x0 && is_unsigned_imm_in_range(imm, 10, 0)) { \
++        } else if (Rd->is_compressed_valid() && (imm & 0b11) == 0x0 && is_uimm10(imm)) {     \
+           c_addi4spn(Rd, imm);                                                               \
+           return;                                                                            \
+         }                                                                                    \
+@@ -2640,7 +2640,7 @@ public:
+ #define INSN(NAME)                                                                           \
+   void NAME(Register Rd, Register Rs1, int32_t imm) {                                        \
+     /* addiw -> c.addiw */                                                                   \
+-    if (do_compress() && (Rd == Rs1 && Rd != x0 && is_imm_in_range(imm, 6, 0))) {            \
++    if (do_compress() && (Rd == Rs1 && Rd != x0 && is_simm6(imm))) {                         \
+       c_addiw(Rd, imm);                                                                      \
+       return;                                                                                \
+     }                                                                                        \
+@@ -2656,7 +2656,7 @@ public:
+   void NAME(Register Rd, Register Rs1, int32_t imm) {                                        \
+     /* and_imm12 -> c.andi */                                                                \
+     if (do_compress() &&                                                                     \
+-        (Rd == Rs1 && Rd->is_compressed_valid() && is_imm_in_range(imm, 6, 0))) {            \
++        (Rd == Rs1 && Rd->is_compressed_valid() && is_simm6(imm))) {                         \
+       c_andi(Rd, imm);                                                                       \
+       return;                                                                                \
+     }                                                                                        \
+@@ -2706,7 +2706,7 @@ public:
+ #define INSN(NAME)                                                                           \
+   void NAME(Register Rd, int32_t imm) {                                                      \
+     /* lui -> c.lui */                                                                       \
+-    if (do_compress() && (Rd != x0 && Rd != x2 && imm != 0 && is_imm_in_range(imm, 18, 0))) { \
++    if (do_compress() && (Rd != x0 && Rd != x2 && imm != 0 && is_simm18(imm))) {             \
+       c_lui(Rd, imm);                                                                        \
+       return;                                                                                \
+     }                                                                                        \
+@@ -2732,9 +2732,20 @@ public:
+   // Stack overflow checking
+   virtual void bang_stack_with_offset(int offset) { Unimplemented(); }
+ 
+-  static bool operand_valid_for_add_immediate(long imm) {
+-    return is_imm_in_range(imm, 12, 0);
+-  }
++  static bool is_simm5(int64_t x);
++  static bool is_simm6(int64_t x);
++  static bool is_simm12(int64_t x);
++  static bool is_simm13(int64_t x);
++  static bool is_simm18(int64_t x);
++  static bool is_simm21(int64_t x);
++
++  static bool is_uimm3(uint64_t x);
++  static bool is_uimm5(uint64_t x);
++  static bool is_uimm6(uint64_t x);
++  static bool is_uimm7(uint64_t x);
++  static bool is_uimm8(uint64_t x);
++  static bool is_uimm9(uint64_t x);
++  static bool is_uimm10(uint64_t x);
+ 
+   // The maximum range of a branch is fixed for the RISCV architecture.
+   static const unsigned long branch_range = 1 * M;
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.inline.hpp b/src/hotspot/cpu/riscv/assembler_riscv.inline.hpp
+index 7ffe8803985..c51650881fc 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.inline.hpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.inline.hpp
+@@ -31,17 +31,19 @@
+ #include "asm/codeBuffer.hpp"
+ #include "code/codeCache.hpp"
+ 
+-inline bool is_imm_in_range(long value, unsigned bits, unsigned align_bits) {
+-  intx sign_bits = (value >> (bits + align_bits - 1));
+-  return ((value & right_n_bits(align_bits)) == 0) && ((sign_bits == 0) || (sign_bits == -1));
+-}
++inline bool Assembler::is_simm5(int64_t x) { return is_simm(x, 5); }
++inline bool Assembler::is_simm6(int64_t x) { return is_simm(x, 6); }
++inline bool Assembler::is_simm12(int64_t x) { return is_simm(x, 12); }
++inline bool Assembler::is_simm13(int64_t x) { return is_simm(x, 13); }
++inline bool Assembler::is_simm18(int64_t x) { return is_simm(x, 18); }
++inline bool Assembler::is_simm21(int64_t x) { return is_simm(x, 21); }
+ 
+-inline bool is_unsigned_imm_in_range(intx value, unsigned bits, unsigned align_bits) {
+-  return (value >= 0) && ((value & right_n_bits(align_bits)) == 0) && ((value >> (align_bits + bits)) == 0);
+-}
+-
+-inline bool is_offset_in_range(intx offset, unsigned bits) {
+-  return is_imm_in_range(offset, bits, 0);
+-}
++inline bool Assembler::is_uimm3(uint64_t x) { return is_uimm(x, 3); }
++inline bool Assembler::is_uimm5(uint64_t x) { return is_uimm(x, 5); }
++inline bool Assembler::is_uimm6(uint64_t x) { return is_uimm(x, 6); }
++inline bool Assembler::is_uimm7(uint64_t x) { return is_uimm(x, 7); }
++inline bool Assembler::is_uimm8(uint64_t x) { return is_uimm(x, 8); }
++inline bool Assembler::is_uimm9(uint64_t x) { return is_uimm(x, 9); }
++inline bool Assembler::is_uimm10(uint64_t x) { return is_uimm(x, 10); }
+ 
+ #endif // CPU_RISCV_ASSEMBLER_RISCV_INLINE_HPP
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_arith_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_arith_riscv.cpp
+index 4c1c13dc290..c2ce4881408 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_arith_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_arith_riscv.cpp
+@@ -61,7 +61,7 @@ void LIR_Assembler::arithmetic_idiv(LIR_Code code, LIR_Opr left, LIR_Opr right,
+         __ sraiw(t0, lreg, 0x1f);
+         __ srliw(t0, t0, BitsPerInt - shift);
+         __ addw(t1, lreg, t0);
+-        if (is_imm_in_range(c - 1, 12, 0)) {
++        if (Assembler::is_simm12(c - 1)) {
+           __ andi(t1, t1, c - 1);
+         } else {
+           __ zero_extend(t1, t1, shift);
+@@ -75,7 +75,7 @@ void LIR_Assembler::arithmetic_idiv(LIR_Code code, LIR_Opr left, LIR_Opr right,
+       } else {
+         unsigned int shift = exact_log2(c);
+         __ sraiw(t0, lreg, 0x1f);
+-        if (is_imm_in_range(c - 1, 12, 0)) {
++        if (Assembler::is_simm12(c - 1)) {
+           __ andi(t0, t0, c - 1);
+         } else {
+           __ zero_extend(t0, t0, shift);
+@@ -198,7 +198,7 @@ void LIR_Assembler::arith_op_double_cpu(LIR_Code code, LIR_Opr left, LIR_Opr rig
+           unsigned int shift = exact_log2_long(c);
+           // use t0 as intermediate result register
+           __ srai(t0, lreg_lo, 0x3f);
+-          if (is_imm_in_range(c - 1, 12, 0)) {
++          if (Assembler::is_simm12(c - 1)) {
+             __ andi(t0, t0, c - 1);
+           } else {
+             __ zero_extend(t0, t0, shift);
+@@ -217,7 +217,7 @@ void LIR_Assembler::arith_op_double_cpu(LIR_Code code, LIR_Opr left, LIR_Opr rig
+           __ srai(t0, lreg_lo, 0x3f);
+           __ srli(t0, t0, BitsPerLong - shift);
+           __ add(t1, lreg_lo, t0);
+-          if (is_imm_in_range(c - 1, 12, 0)) {
++          if (Assembler::is_simm12(c - 1)) {
+             __ andi(t1, t1, c - 1);
+           } else {
+             __ zero_extend(t1, t1, shift);
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 313687e4573..80d7428c904 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1314,7 +1314,7 @@ void LIR_Assembler::logic_op(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr
+     Register Rdst = dst->as_register();
+     if (right->is_constant()) {
+       int right_const = right->as_jint();
+-      if (Assembler::operand_valid_for_add_immediate(right_const)) {
++      if (Assembler::is_simm12(right_const)) {
+         logic_op_imm(Rdst, Rleft, right_const, code);
+         __ addw(Rdst, Rdst, zr);
+      } else {
+@@ -1329,7 +1329,7 @@ void LIR_Assembler::logic_op(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr
+     Register Rdst = dst->as_register_lo();
+     if (right->is_constant()) {
+       long right_const = right->as_jlong();
+-      if (Assembler::operand_valid_for_add_immediate(right_const)) {
++      if (Assembler::is_simm12(right_const)) {
+         logic_op_imm(Rdst, Rleft, right_const, code);
+       } else {
+         __ mv(t0, right_const);
+@@ -1826,7 +1826,7 @@ void LIR_Assembler::leal(LIR_Opr addr, LIR_Opr dest, LIR_PatchCode patch_code, C
+       offset += ((intptr_t)index_op->as_constant_ptr()->as_jint()) << scale;
+     }
+ 
+-    if (!is_imm_in_range(offset, 12, 0)) {
++    if (!Assembler::is_simm12(offset)) {
+       __ la(t0, as_Address(adr));
+       __ mv(dst, t0);
+       return;
+diff --git a/src/hotspot/cpu/riscv/c1_LIRGenerator_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRGenerator_riscv.cpp
+index 715d04467ba..55a309f24ba 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRGenerator_riscv.cpp
+@@ -126,15 +126,13 @@ bool LIRGenerator::can_inline_as_constant(Value v) const {
+   if (v->type()->as_IntConstant() != NULL) {
+     int value = v->type()->as_IntConstant()->value();
+     // "-value" must be defined for value may be used for sub
+-    return Assembler::operand_valid_for_add_immediate(value) &&
+-           Assembler::operand_valid_for_add_immediate(- value);
++    return Assembler::is_simm12(value) && Assembler::is_simm12(- value);
+   } else if (v->type()->as_ObjectConstant() != NULL) {
+     return v->type()->as_ObjectConstant()->value()->is_null_object();
+   } else if (v->type()->as_LongConstant() != NULL) {
+     long value = v->type()->as_LongConstant()->value();
+     // "-value" must be defined for value may be used for sub
+-    return Assembler::operand_valid_for_add_immediate(value) &&
+-           Assembler::operand_valid_for_add_immediate(- value);
++    return Assembler::is_simm12(value) && Assembler::is_simm12(- value);
+   } else if (v->type()->as_FloatConstant() != NULL) {
+     return v->type()->as_FloatConstant()->value() == 0.0f;
+   } else if (v->type()->as_DoubleConstant() != NULL) {
+@@ -152,8 +150,7 @@ bool LIRGenerator::can_inline_as_constant(LIR_Const* c) const {
+       default:     return false;
+     }
+     // "-constant" must be defined for c may be used for sub
+-    return Assembler::operand_valid_for_add_immediate(constant) &&
+-           Assembler::operand_valid_for_add_immediate(- constant);
++    return Assembler::is_simm12(constant) && Assembler::is_simm12(- constant);
+   }
+   return false;
+ }
+@@ -416,9 +413,9 @@ void LIRGenerator::do_ArithmeticOp_Long(ArithmeticOp* x) {
+       if (x->op() == Bytecodes::_lmul ||
+           !right.is_constant() ||
+           (x->op() == Bytecodes::_ladd &&
+-          !Assembler::operand_valid_for_add_immediate(right.get_jlong_constant())) ||
++          !Assembler::is_simm12(right.get_jlong_constant())) ||
+           (x->op() == Bytecodes::_lsub &&
+-          !Assembler::operand_valid_for_add_immediate(-right.get_jlong_constant()))) {
++          !Assembler::is_simm12(-right.get_jlong_constant()))) {
+             right.load_item();
+       } else { // add, sub
+         assert(x->op() == Bytecodes::_ladd || x->op() == Bytecodes::_lsub, "expected ladd or lsub");
+@@ -479,8 +476,8 @@ void LIRGenerator::do_ArithmeticOp_Int(ArithmeticOp* x) {
+ 
+   } else if (x->op() == Bytecodes::_iadd || x->op() == Bytecodes::_isub) {
+     if (right.is_constant() &&
+-        ((x->op() == Bytecodes::_iadd && !Assembler::operand_valid_for_add_immediate(right.get_jint_constant())) ||
+-         (x->op() == Bytecodes::_isub && !Assembler::operand_valid_for_add_immediate(-right.get_jint_constant())))) {
++        ((x->op() == Bytecodes::_iadd && !Assembler::is_simm12(right.get_jint_constant())) ||
++         (x->op() == Bytecodes::_isub && !Assembler::is_simm12(-right.get_jint_constant())))) {
+       right.load_nonconstant();
+     } else {
+       right.load_item();
+@@ -551,8 +548,8 @@ void LIRGenerator::do_LogicOp(LogicOp* x) {
+   rlock_result(x);
+   ValueTag tag = right.type()->tag();
+   if (right.is_constant() &&
+-     ((tag == longTag && Assembler::operand_valid_for_add_immediate(right.get_jlong_constant())) ||
+-      (tag == intTag && Assembler::operand_valid_for_add_immediate(right.get_jint_constant()))))  {
++     ((tag == longTag && Assembler::is_simm12(right.get_jlong_constant())) ||
++      (tag == intTag && Assembler::is_simm12(right.get_jint_constant()))))  {
+     right.dont_load_item();
+   } else {
+     right.load_item();
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 214520c9510..e345ccf372a 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -650,7 +650,7 @@ void MacroAssembler::super_call_VM_leaf(address entry_point, Register arg_0, Reg
+ 
+ void MacroAssembler::la(Register Rd, const address dest) {
+   int64_t offset = dest - pc();
+-  if (is_offset_in_range(offset, 32)) {
++  if (is_simm32(offset)) {
+     auipc(Rd, (int32_t)offset + 0x800);  //0x800, Note:the 11th sign bit
+     addi(Rd, Rd, ((int64_t)offset << 52) >> 52);
+   } else {
+@@ -730,7 +730,7 @@ void MacroAssembler::li64(Register Rd, int64_t imm) {
+ void MacroAssembler::li(Register Rd, int64_t imm) {
+   // int64_t is in range 0x8000 0000 0000 0000 ~ 0x7fff ffff ffff ffff
+   // li -> c.li
+-  if (do_compress() && (is_imm_in_range(imm, 6, 0) && Rd != x0)) {
++  if (do_compress() && (is_simm6(imm) && Rd != x0)) {
+     c_li(Rd, imm);
+     return;
+   }
+@@ -769,7 +769,7 @@ void MacroAssembler::li(Register Rd, int64_t imm) {
+   void MacroAssembler::NAME(const address dest, Register temp) {   \
+     assert_cond(dest != NULL);                                     \
+     int64_t distance = dest - pc();                                \
+-    if (is_imm_in_range(distance, 20, 1)) {                        \
++    if (is_simm21(distance) && ((distance % 2) == 0)) {            \
+       Assembler::jal(REGISTER, distance);                          \
+     } else {                                                       \
+       assert(temp != noreg, "expecting a register");               \
+@@ -812,7 +812,7 @@ void MacroAssembler::li(Register Rd, int64_t imm) {
+   void MacroAssembler::NAME(Register Rd, const address dest, Register temp) {         \
+     assert_cond(dest != NULL);                                                        \
+     int64_t distance = dest - pc();                                                   \
+-    if (is_imm_in_range(distance, 20, 1)) {                                           \
++    if (is_simm21(distance) && ((distance % 2) == 0)) {                               \
+       Assembler::NAME(Rd, distance);                                                  \
+     } else {                                                                          \
+       assert_different_registers(Rd, temp);                                           \
+@@ -1278,7 +1278,8 @@ void MacroAssembler::pop_CPU_state(bool restore_vectors, int vector_size_in_byte
+ }
+ 
+ static int patch_offset_in_jal(address branch, int64_t offset) {
+-  assert(is_imm_in_range(offset, 20, 1), "offset is too large to be patched in one jal insrusction!\n");
++  assert(Assembler::is_simm21(offset) && ((offset % 2) == 0),
++         "offset is too large to be patched in one jal instruction!\n");
+   Assembler::patch(branch, 31, 31, (offset >> 20) & 0x1);                       // offset[20]    ==> branch[31]
+   Assembler::patch(branch, 30, 21, (offset >> 1)  & 0x3ff);                     // offset[10:1]  ==> branch[30:21]
+   Assembler::patch(branch, 20, 20, (offset >> 11) & 0x1);                       // offset[11]    ==> branch[20]
+@@ -1287,7 +1288,8 @@ static int patch_offset_in_jal(address branch, int64_t offset) {
+ }
+ 
+ static int patch_offset_in_conditional_branch(address branch, int64_t offset) {
+-  assert(is_imm_in_range(offset, 12, 1), "offset is too large to be patched in one beq/bge/bgeu/blt/bltu/bne insrusction!\n");
++  assert(Assembler::is_simm13(offset) && ((offset % 2) == 0),
++         "offset is too large to be patched in one beq/bge/bgeu/blt/bltu/bne instruction!\n");
+   Assembler::patch(branch, 31, 31, (offset >> 12) & 0x1);                       // offset[12]    ==> branch[31]
+   Assembler::patch(branch, 30, 25, (offset >> 5)  & 0x3f);                      // offset[10:5]  ==> branch[30:25]
+   Assembler::patch(branch, 7,  7,  (offset >> 11) & 0x1);                       // offset[11]    ==> branch[7]
+@@ -1495,8 +1497,7 @@ void MacroAssembler::movptr(Register Rd, address addr, int32_t &offset) {
+     block_comment(buffer);
+   }
+ #endif
+-  assert(is_unsigned_imm_in_range(imm64, 47, 0) || (imm64 == (int64_t)-1),
+-         "bit 47 overflows in address constant");
++  assert((uintptr_t)imm64 < (1ull << 48), "48-bit overflow in address constant");
+   // Load upper 31 bits
+   int64_t imm = imm64 >> 17;
+   int64_t upper = imm, lower = imm;
+@@ -1516,7 +1517,7 @@ void MacroAssembler::movptr(Register Rd, address addr, int32_t &offset) {
+ }
+ 
+ void MacroAssembler::add(Register Rd, Register Rn, int64_t increment, Register temp) {
+-  if (is_imm_in_range(increment, 12, 0)) {
++  if (is_simm12(increment)) {
+     addi(Rd, Rn, increment);
+   } else {
+     assert_different_registers(Rn, temp);
+@@ -1526,7 +1527,7 @@ void MacroAssembler::add(Register Rd, Register Rn, int64_t increment, Register t
+ }
+ 
+ void MacroAssembler::addw(Register Rd, Register Rn, int32_t increment, Register temp) {
+-  if (is_imm_in_range(increment, 12, 0)) {
++  if (is_simm12(increment)) {
+     addiw(Rd, Rn, increment);
+   } else {
+     assert_different_registers(Rn, temp);
+@@ -1536,7 +1537,7 @@ void MacroAssembler::addw(Register Rd, Register Rn, int32_t increment, Register
+ }
+ 
+ void MacroAssembler::sub(Register Rd, Register Rn, int64_t decrement, Register temp) {
+-  if (is_imm_in_range(-decrement, 12, 0)) {
++  if (is_simm12(-decrement)) {
+     addi(Rd, Rn, -decrement);
+   } else {
+     assert_different_registers(Rn, temp);
+@@ -1546,7 +1547,7 @@ void MacroAssembler::sub(Register Rd, Register Rn, int64_t decrement, Register t
+ }
+ 
+ void MacroAssembler::subw(Register Rd, Register Rn, int32_t decrement, Register temp) {
+-  if (is_imm_in_range(-decrement, 12, 0)) {
++  if (is_simm12(-decrement)) {
+     addiw(Rd, Rn, -decrement);
+   } else {
+     assert_different_registers(Rn, temp);
+@@ -1782,7 +1783,7 @@ void MacroAssembler::ror_imm(Register dst, Register src, uint32_t shift, Registe
+ }
+ 
+ void MacroAssembler::andi(Register Rd, Register Rn, int64_t imm, Register tmp) {
+-  if (is_imm_in_range(imm, 12, 0)) {
++  if (is_simm12(imm)) {
+     and_imm12(Rd, Rn, imm);
+   } else {
+     assert_different_registers(Rn, tmp);
+@@ -1796,7 +1797,7 @@ void MacroAssembler::orptr(Address adr, RegisterOrConstant src, Register tmp1, R
+   if (src.is_register()) {
+     orr(tmp1, tmp1, src.as_register());
+   } else {
+-    if (is_imm_in_range(src.as_constant(), 12, 0)) {
++    if (is_simm12(src.as_constant())) {
+       ori(tmp1, tmp1, src.as_constant());
+     } else {
+       assert_different_registers(tmp1, tmp2);
+@@ -2320,7 +2321,7 @@ void MacroAssembler::membar(uint32_t order_constraint) {
+ // is up to you to ensure that the shift provided mathces the size
+ // of your data.
+ Address MacroAssembler::form_address(Register Rd, Register base, int64_t byte_offset) {
+-  if (is_offset_in_range(byte_offset, 12)) { // 12: imm in range 2^12
++  if (is_simm12(byte_offset)) { // 12: imm in range 2^12
+     return Address(base, byte_offset);
+   }
+ 
+@@ -2916,8 +2917,8 @@ void MacroAssembler::la_patchable(Register reg1, const Address &dest, int32_t &o
+   long offset_low = dest_address - low_address;
+   long offset_high = dest_address - high_address;
+ 
+-  assert(is_valid_riscv64_address(dest.target()), "bad address");
+   assert(dest.getMode() == Address::literal, "la_patchable must be applied to a literal address");
++  assert((uintptr_t)dest.target() < (1ull << 48), "bad address");
+ 
+   // RISC-V doesn't compute a page-aligned address, in order to partially
+   // compensate for the use of *signed* offsets in its base+disp12
+@@ -3361,7 +3362,7 @@ Address MacroAssembler::add_memory_helper(const Address dst, Register tmp) {
+ 
+ void MacroAssembler::increment(const Address dst, int64_t value, Register tmp1, Register tmp2) {
+   assert(((dst.getMode() == Address::base_plus_offset &&
+-           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++           is_simm12(dst.offset())) || is_simm12(value)),
+           "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst, tmp2);
+   assert(!adr.uses(tmp1), "invalid dst for address increment");
+@@ -3372,7 +3373,7 @@ void MacroAssembler::increment(const Address dst, int64_t value, Register tmp1,
+ 
+ void MacroAssembler::incrementw(const Address dst, int32_t value, Register tmp1, Register tmp2) {
+   assert(((dst.getMode() == Address::base_plus_offset &&
+-           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++           is_simm12(dst.offset())) || is_simm12(value)),
+           "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst, tmp2);
+   assert(!adr.uses(tmp1), "invalid dst for address increment");
+@@ -3383,7 +3384,7 @@ void MacroAssembler::incrementw(const Address dst, int32_t value, Register tmp1,
+ 
+ void MacroAssembler::decrement(const Address dst, int64_t value, Register tmp1, Register tmp2) {
+   assert(((dst.getMode() == Address::base_plus_offset &&
+-           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++           is_simm12(dst.offset())) || is_simm12(value)),
+           "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst, tmp2);
+   assert(!adr.uses(tmp1), "invalid dst for address decrement");
+@@ -3394,7 +3395,7 @@ void MacroAssembler::decrement(const Address dst, int64_t value, Register tmp1,
+ 
+ void MacroAssembler::decrementw(const Address dst, int32_t value, Register tmp1, Register tmp2) {
+   assert(((dst.getMode() == Address::base_plus_offset &&
+-           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++           is_simm12(dst.offset())) || is_simm12(value)),
+           "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst, tmp2);
+   assert(!adr.uses(tmp1), "invalid dst for address decrement");
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index e744ae18067..45b2f58f066 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -27,7 +27,7 @@
+ #ifndef CPU_RISCV_MACROASSEMBLER_RISCV_HPP
+ #define CPU_RISCV_MACROASSEMBLER_RISCV_HPP
+ 
+-#include "asm/assembler.hpp"
++#include "asm/assembler.inline.hpp"
+ #include "metaprogramming/enableIf.hpp"
+ #include "nativeInst_riscv.hpp"
+ #include "oops/compressedOops.hpp"
+@@ -267,7 +267,7 @@ class MacroAssembler: public Assembler {
+   // accesses, and these can exceed the offset range.
+   Address legitimize_address(Register Rd, const Address &adr) {
+     if (adr.getMode() == Address::base_plus_offset) {
+-      if (!is_offset_in_range(adr.offset(), 12)) {
++      if (!is_simm12(adr.offset())) {
+         return form_address(Rd, adr.base(), adr.offset());
+       }
+     }
+@@ -568,7 +568,7 @@ class MacroAssembler: public Assembler {
+   void NAME(Register Rs1, Register Rs2, const address dest) {                                            \
+     assert_cond(dest != NULL);                                                                           \
+     int64_t offset = dest - pc();                                                                        \
+-    guarantee(is_imm_in_range(offset, 12, 1), "offset is invalid.");                                     \
++    guarantee(is_simm13(offset) && ((offset % 2) == 0), "offset is invalid.");                           \
+     Assembler::NAME(Rs1, Rs2, offset);                                                                   \
+   }                                                                                                      \
+   INSN_ENTRY_RELOC(void, NAME(Register Rs1, Register Rs2, address dest, relocInfo::relocType rtype))     \
+@@ -755,7 +755,7 @@ public:
+   void NAME(Register Rd, address dest) {                                                           \
+     assert_cond(dest != NULL);                                                                     \
+     int64_t distance = dest - pc();                                                                \
+-    if (is_offset_in_range(distance, 32)) {                                                        \
++    if (is_simm32(distance)) {                                                                     \
+       auipc(Rd, (int32_t)distance + 0x800);                                                        \
+       Assembler::NAME(Rd, Rd, ((int32_t)distance << 20) >> 20);                                    \
+     } else {                                                                                       \
+@@ -775,7 +775,7 @@ public:
+         break;                                                                                     \
+       }                                                                                            \
+       case Address::base_plus_offset: {                                                            \
+-        if (is_offset_in_range(adr.offset(), 12)) {                                                \
++        if (is_simm12(adr.offset())) {                                                             \
+           Assembler::NAME(Rd, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+           int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
+@@ -811,7 +811,7 @@ public:
+   void NAME(FloatRegister Rd, address dest, Register temp = t0) {                                  \
+     assert_cond(dest != NULL);                                                                     \
+     int64_t distance = dest - pc();                                                                \
+-    if (is_offset_in_range(distance, 32)) {                                                        \
++    if (is_simm32(distance)) {                                                                     \
+       auipc(temp, (int32_t)distance + 0x800);                                                      \
+       Assembler::NAME(Rd, temp, ((int32_t)distance << 20) >> 20);                                  \
+     } else {                                                                                       \
+@@ -832,7 +832,7 @@ public:
+         break;                                                                                     \
+       }                                                                                            \
+       case Address::base_plus_offset: {                                                            \
+-        if (is_offset_in_range(adr.offset(), 12)) {                                                \
++        if (is_simm12(adr.offset())) {                                                             \
+           Assembler::NAME(Rd, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+           int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
+@@ -871,7 +871,7 @@ public:
+     assert_cond(dest != NULL);                                                                     \
+     assert_different_registers(Rs, temp);                                                          \
+     int64_t distance = dest - pc();                                                                \
+-    if (is_offset_in_range(distance, 32)) {                                                        \
++    if (is_simm32(distance)) {                                                                     \
+       auipc(temp, (int32_t)distance + 0x800);                                                      \
+       Assembler::NAME(Rs, temp, ((int32_t)distance << 20) >> 20);                                  \
+     } else {                                                                                       \
+@@ -889,7 +889,7 @@ public:
+         break;                                                                                     \
+       }                                                                                            \
+       case Address::base_plus_offset: {                                                            \
+-        if (is_offset_in_range(adr.offset(), 12)) {                                                \
++        if (is_simm12(adr.offset())) {                                                             \
+           Assembler::NAME(Rs, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+           assert_different_registers(Rs, temp);                                                    \
+@@ -915,7 +915,7 @@ public:
+   void NAME(FloatRegister Rs, address dest, Register temp = t0) {                                  \
+     assert_cond(dest != NULL);                                                                     \
+     int64_t distance = dest - pc();                                                                \
+-    if (is_offset_in_range(distance, 32)) {                                                        \
++    if (is_simm32(distance)) {                                                                     \
+       auipc(temp, (int32_t)distance + 0x800);                                                      \
+       Assembler::NAME(Rs, temp, ((int32_t)distance << 20) >> 20);                                  \
+     } else {                                                                                       \
+@@ -932,7 +932,7 @@ public:
+         break;                                                                                     \
+       }                                                                                            \
+       case Address::base_plus_offset: {                                                            \
+-        if (is_offset_in_range(adr.offset(), 12)) {                                                \
++        if (is_simm12(adr.offset())) {                                                             \
+           Assembler::NAME(Rs, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+           int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
+@@ -1260,12 +1260,6 @@ private:
+ #endif
+   void repne_scan(Register addr, Register value, Register count, Register tmp);
+ 
+-  // Return true if an address is within the 48-bit RISCV64 address space.
+-  bool is_valid_riscv64_address(address addr) {
+-    // sv48: must have bits 63–48 all equal to bit 47
+-    return ((uintptr_t)addr >> 47) == 0;
+-  }
+-
+   void ld_constant(Register dest, const Address &const_addr) {
+     if (NearCpool) {
+       ld(dest, const_addr);
+diff --git a/src/hotspot/cpu/riscv/nativeInst_riscv.cpp b/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
+index 3f88e7abfa4..675ed5be189 100644
+--- a/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
++++ b/src/hotspot/cpu/riscv/nativeInst_riscv.cpp
+@@ -368,7 +368,8 @@ void NativeJump::patch_verified_entry(address entry, address verified_entry, add
+   // Patch this nmethod atomically.
+   if (Assembler::reachable_from_branch_at(verified_entry, dest)) {
+     ptrdiff_t offset = dest - verified_entry;
+-    guarantee(is_imm_in_range(offset, 20, 1), "offset is too large to be patched in one jal insrusction."); // 1M
++    guarantee(Assembler::is_simm21(offset) && ((offset % 2) == 0),
++              "offset is too large to be patched in one jal instruction."); // 1M
+ 
+     uint32_t insn = 0;
+     address pInsn = (address)&insn;
+diff --git a/src/hotspot/cpu/riscv/nativeInst_riscv.hpp b/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
+index a4c5c4d934e..288ccc08d81 100644
+--- a/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
++++ b/src/hotspot/cpu/riscv/nativeInst_riscv.hpp
+@@ -261,7 +261,7 @@ class NativeCall: public NativeInstruction {
+     assert(is_jal(), "Should be jal instruction!");
+     intptr_t offset = (intptr_t)(dest - instruction_address());
+     assert((offset & 0x1) == 0, "bad alignment");
+-    assert(is_imm_in_range(offset, 20, 1), "encoding constraint");
++    assert(Assembler::is_simm21(offset), "encoding constraint");
+     unsigned int insn = 0b1101111; // jal
+     address pInsn = (address)(&insn);
+     Assembler::patch(pInsn, 31, 31, (offset >> 20) & 0x1);
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index 4b148607fda..f74f0feadb5 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -1676,13 +1676,11 @@ void BoxLockNode::emit(CodeBuffer &cbuf, PhaseRegAlloc *ra_) const {
+   int offset = ra_->reg2offset(in_RegMask(0).find_first_elem());
+   int reg    = ra_->get_encode(this);
+ 
+-  if (is_imm_in_range(offset, 12, 0)) {
++  if (Assembler::is_simm12(offset)) {
+     __ addi(as_Register(reg), sp, offset);
+-  } else if (is_imm_in_range(offset, 32, 0)) {
++  } else {
+     __ li32(t0, offset);
+     __ add(as_Register(reg), sp, t0);
+-  } else {
+-    ShouldNotReachHere();
+   }
+ }
+ 
+@@ -1690,7 +1688,7 @@ uint BoxLockNode::size(PhaseRegAlloc *ra_) const {
+   // BoxLockNode is not a MachNode, so we can't just call MachNode::size(ra_).
+   int offset = ra_->reg2offset(in_RegMask(0).find_first_elem());
+ 
+-  if (is_imm_in_range(offset, 12, 0)) {
++  if (Assembler::is_simm12(offset)) {
+     return NativeInstruction::instruction_size;
+   } else {
+     return 3 * NativeInstruction::instruction_size; // lui + addiw + add;
+@@ -2786,7 +2784,7 @@ operand immI_63()
+ // 32 bit integer valid for add immediate
+ operand immIAdd()
+ %{
+-  predicate(Assembler::operand_valid_for_add_immediate((int64_t)n->get_int()));
++  predicate(Assembler::is_simm12((int64_t)n->get_int()));
+   match(ConI);
+   op_cost(0);
+   format %{ %}
+@@ -2796,7 +2794,7 @@ operand immIAdd()
+ // 32 bit integer valid for sub immediate
+ operand immISub()
+ %{
+-  predicate(Assembler::operand_valid_for_add_immediate(-(int64_t)n->get_int()));
++  predicate(Assembler::is_simm12(-(int64_t)n->get_int()));
+   match(ConI);
+   op_cost(0);
+   format %{ %}
+@@ -2951,7 +2949,7 @@ operand immL_pc_off()
+ // 64 bit integer valid for add immediate
+ operand immLAdd()
+ %{
+-  predicate(Assembler::operand_valid_for_add_immediate(n->get_long()));
++  predicate(Assembler::is_simm12(n->get_long()));
+   match(ConL);
+   op_cost(0);
+   format %{ %}
+@@ -2961,7 +2959,7 @@ operand immLAdd()
+ // 64 bit integer valid for sub immediate
+ operand immLSub()
+ %{
+-  predicate(Assembler::operand_valid_for_add_immediate(-(n->get_long())));
++  predicate(Assembler::is_simm12(-(n->get_long())));
+   match(ConL);
+   op_cost(0);
+   format %{ %}
+@@ -3042,7 +3040,7 @@ operand immF0()
+ 
+ operand immIOffset()
+ %{
+-  predicate(is_imm_in_range(n->get_int(), 12, 0));
++  predicate(Assembler::is_simm12(n->get_int()));
+   match(ConI);
+   op_cost(0);
+   format %{ %}
+@@ -3051,7 +3049,7 @@ operand immIOffset()
+ 
+ operand immLOffset()
+ %{
+-  predicate(is_imm_in_range(n->get_long(), 12, 0));
++  predicate(Assembler::is_simm12(n->get_long()));
+   match(ConL);
+   op_cost(0);
+   format %{ %}
+diff --git a/src/hotspot/os_cpu/linux_riscv/os_linux_riscv.cpp b/src/hotspot/os_cpu/linux_riscv/os_linux_riscv.cpp
+index c4b72926f74..d672b57182f 100644
+--- a/src/hotspot/os_cpu/linux_riscv/os_linux_riscv.cpp
++++ b/src/hotspot/os_cpu/linux_riscv/os_linux_riscv.cpp
+@@ -83,7 +83,10 @@ NOINLINE address os::current_stack_pointer() {
+ 
+ char* os::non_memory_address_word() {
+   // Must never look like an address returned by reserve_memory,
+-  return (char*) -1;
++  // even in its subfields (as defined by the CPU immediate fields,
++  // if the CPU splits constants across multiple instructions).
++
++  return (char*) 0xffffffffffff;
+ }
+ 
+ address os::Posix::ucontext_get_pc(const ucontext_t * uc) {

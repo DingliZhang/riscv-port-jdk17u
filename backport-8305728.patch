@@ -1,0 +1,692 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 80d7428c904..50fedf1d57a 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1634,7 +1634,7 @@ void LIR_Assembler::check_conflict(ciKlass* exact_klass, intptr_t current_klass,
+     __ beqz(t0, next);
+ 
+     // already unknown. Nothing to do anymore.
+-    __ andi(t0, tmp, TypeEntries::type_unknown);
++    __ test_bit(t0, tmp, exact_log2(TypeEntries::type_unknown));
+     __ bnez(t0, next);
+ 
+     if (TypeEntries::is_type_none(current_klass)) {
+@@ -1656,7 +1656,7 @@ void LIR_Assembler::check_conflict(ciKlass* exact_klass, intptr_t current_klass,
+ 
+     __ ld(tmp, mdo_addr);
+     // already unknown. Nothing to do anymore.
+-    __ andi(t0, tmp, TypeEntries::type_unknown);
++    __ test_bit(t0, tmp, exact_log2(TypeEntries::type_unknown));
+     __ bnez(t0, next);
+   }
+ 
+@@ -1711,7 +1711,7 @@ void LIR_Assembler::check_no_conflict(ciKlass* exact_klass, intptr_t current_kla
+ 
+     __ ld(tmp, mdo_addr);
+     // already unknown. Nothing to do anymore.
+-    __ andi(t0, tmp, TypeEntries::type_unknown);
++    __ test_bit(t0, tmp, exact_log2(TypeEntries::type_unknown));
+     __ bnez(t0, next);
+ 
+     __ ori(tmp, tmp, TypeEntries::type_unknown);
+diff --git a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+index 278e50dbb90..6a4742ae3dd 100644
+--- a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+@@ -66,7 +66,7 @@ int C1_MacroAssembler::lock_object(Register hdr, Register obj, Register disp_hdr
+   if (DiagnoseSyncOnValueBasedClasses != 0) {
+     load_klass(hdr, obj);
+     lwu(hdr, Address(hdr, Klass::access_flags_offset()));
+-    andi(t0, hdr, JVM_ACC_IS_VALUE_BASED_CLASS);
++    test_bit(t0, hdr, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS));
+     bnez(t0, slow_case, true /* is_far */);
+   }
+ 
+diff --git a/src/hotspot/cpu/riscv/c1_Runtime1_riscv.cpp b/src/hotspot/cpu/riscv/c1_Runtime1_riscv.cpp
+index 3bd9cec09c1..2d01a92623f 100644
+--- a/src/hotspot/cpu/riscv/c1_Runtime1_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_Runtime1_riscv.cpp
+@@ -910,7 +910,7 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
+         Register t = x15;
+         __ load_klass(t, x10);
+         __ lwu(t, Address(t, Klass::access_flags_offset()));
+-        __ andi(t0, t, JVM_ACC_HAS_FINALIZER);
++        __ test_bit(t0, t, exact_log2(JVM_ACC_HAS_FINALIZER));
+         __ bnez(t0, register_finalizer);
+         __ ret();
+ 
+diff --git a/src/hotspot/cpu/riscv/c2_MacroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c2_MacroAssembler_riscv.cpp
+index 0286e318688..15220c4133e 100644
+--- a/src/hotspot/cpu/riscv/c2_MacroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c2_MacroAssembler_riscv.cpp
+@@ -1147,7 +1147,7 @@ void C2_MacroAssembler::string_equals(Register a1, Register a2,
+   Label TAIL03, TAIL01;
+ 
+   // 0-7 bytes left.
+-  andi(t0, cnt1, 4);
++  test_bit(t0, cnt1, 2);
+   beqz(t0, TAIL03);
+   {
+     lwu(tmp1, Address(a1, 0));
+@@ -1159,7 +1159,7 @@ void C2_MacroAssembler::string_equals(Register a1, Register a2,
+ 
+   bind(TAIL03);
+   // 0-3 bytes left.
+-  andi(t0, cnt1, 2);
++  test_bit(t0, cnt1, 1);
+   beqz(t0, TAIL01);
+   {
+     lhu(tmp1, Address(a1, 0));
+@@ -1172,7 +1172,7 @@ void C2_MacroAssembler::string_equals(Register a1, Register a2,
+   bind(TAIL01);
+   if (elem_size == 1) { // Only needed when comparing 1-byte elements
+     // 0-1 bytes left.
+-    andi(t0, cnt1, 1);
++    test_bit(t0, cnt1, 0);
+     beqz(t0, SAME);
+     {
+       lbu(tmp1, Address(a1, 0));
+diff --git a/src/hotspot/cpu/riscv/gc/shenandoah/shenandoahBarrierSetAssembler_riscv.cpp b/src/hotspot/cpu/riscv/gc/shenandoah/shenandoahBarrierSetAssembler_riscv.cpp
+index 4a8fe24830f..76caa33b61f 100644
+--- a/src/hotspot/cpu/riscv/gc/shenandoah/shenandoahBarrierSetAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/gc/shenandoah/shenandoahBarrierSetAssembler_riscv.cpp
+@@ -61,7 +61,7 @@ void ShenandoahBarrierSetAssembler::arraycopy_prologue(MacroAssembler* masm, Dec
+ 
+       __ lbu(t0, gc_state);
+       if (ShenandoahSATBBarrier && dest_uninitialized) {
+-        __ andi(t0, t0, ShenandoahHeap::HAS_FORWARDED);
++        __ test_bit(t0, t0, ShenandoahHeap::HAS_FORWARDED_BITPOS);
+         __ beqz(t0, done);
+       } else {
+         __ andi(t0, t0, ShenandoahHeap::HAS_FORWARDED | ShenandoahHeap::MARKING);
+@@ -246,13 +246,13 @@ void ShenandoahBarrierSetAssembler::load_reference_barrier(MacroAssembler* masm,
+ 
+   // Check for heap stability
+   if (is_strong) {
+-    __ andi(t1, t1, ShenandoahHeap::HAS_FORWARDED);
++    __ test_bit(t1, t1, ShenandoahHeap::HAS_FORWARDED_BITPOS);
+     __ beqz(t1, heap_stable);
+   } else {
+     Label lrb;
+-    __ andi(t0, t1, ShenandoahHeap::WEAK_ROOTS);
++    __ test_bit(t0, t1, ShenandoahHeap::WEAK_ROOTS_BITPOS);
+     __ bnez(t0, lrb);
+-    __ andi(t0, t1, ShenandoahHeap::HAS_FORWARDED);
++    __ test_bit(t0, t1, ShenandoahHeap::HAS_FORWARDED_BITPOS);
+     __ beqz(t0, heap_stable);
+     __ bind(lrb);
+   }
+@@ -276,7 +276,7 @@ void ShenandoahBarrierSetAssembler::load_reference_barrier(MacroAssembler* masm,
+     __ srli(t0, x10, ShenandoahHeapRegion::region_size_bytes_shift_jint());
+     __ add(t1, t1, t0);
+     __ lbu(t1, Address(t1));
+-    __ andi(t0, t1, 1);
++    __ test_bit(t0, t1, 0);
+     __ beqz(t0, not_cset);
+   }
+ 
+@@ -447,7 +447,7 @@ void ShenandoahBarrierSetAssembler::try_resolve_jobject_in_native(MacroAssembler
+   __ lbu(t1, gc_state);
+ 
+   // Check for heap in evacuation phase
+-  __ andi(t0, t1, ShenandoahHeap::EVACUATION);
++  __ test_bit(t0, t1, ShenandoahHeap::EVACUATION_BITPOS);
+   __ bnez(t0, slowpath);
+ 
+   __ bind(done);
+@@ -640,7 +640,7 @@ void ShenandoahBarrierSetAssembler::generate_c1_pre_barrier_runtime_stub(StubAss
+   // Is marking still active?
+   Address gc_state(thread, in_bytes(ShenandoahThreadLocalData::gc_state_offset()));
+   __ lb(tmp, gc_state);
+-  __ andi(tmp, tmp, ShenandoahHeap::MARKING);
++  __ test_bit(tmp, tmp, ShenandoahHeap::MARKING_BITPOS);
+   __ beqz(tmp, done);
+ 
+   // Can we store original value in the thread's buffer?
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+index 4ae1a7ade0d..506279ede95 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+@@ -99,9 +99,9 @@ void InterpreterMacroAssembler::check_and_handle_popframe(Register java_thread)
+     // This method is only called just after the call into the vm in
+     // call_VM_base, so the arg registers are available.
+     lwu(t1, Address(xthread, JavaThread::popframe_condition_offset()));
+-    andi(t0, t1, JavaThread::popframe_pending_bit);
++    test_bit(t0, t1, exact_log2(JavaThread::popframe_pending_bit));
+     beqz(t0, L);
+-    andi(t0, t1, JavaThread::popframe_processing_bit);
++    test_bit(t0, t1, exact_log2(JavaThread::popframe_processing_bit));
+     bnez(t0, L);
+     // Call Interpreter::remove_activation_preserving_args_entry() to get the
+     // address of the same-named entrypoint in the generated interpreter code.
+@@ -523,7 +523,7 @@ void InterpreterMacroAssembler::dispatch_base(TosState state,
+   if (needs_thread_local_poll) {
+     NOT_PRODUCT(block_comment("Thread-local Safepoint poll"));
+     ld(t1, Address(xthread, JavaThread::polling_word_offset()));
+-    andi(t1, t1, SafepointMechanism::poll_bit());
++    test_bit(t1, t1, exact_log2(SafepointMechanism::poll_bit()));
+     bnez(t1, safepoint);
+   }
+   if (table == Interpreter::dispatch_table(state)) {
+@@ -620,7 +620,7 @@ void InterpreterMacroAssembler::remove_activation(
+   // get method access flags
+   ld(x11, Address(fp, frame::interpreter_frame_method_offset * wordSize));
+   ld(x12, Address(x11, Method::access_flags_offset()));
+-  andi(t0, x12, JVM_ACC_SYNCHRONIZED);
++  test_bit(t0, x12, exact_log2(JVM_ACC_SYNCHRONIZED));
+   beqz(t0, unlocked);
+ 
+   // Don't unlock anything if the _do_not_unlock_if_synchronized flag
+@@ -805,7 +805,7 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
+     if (DiagnoseSyncOnValueBasedClasses != 0) {
+       load_klass(tmp, obj_reg);
+       lwu(tmp, Address(tmp, Klass::access_flags_offset()));
+-      andi(tmp, tmp, JVM_ACC_IS_VALUE_BASED_CLASS);
++      test_bit(tmp, tmp, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS));
+       bnez(tmp, slow_case);
+     }
+ 
+@@ -1671,7 +1671,7 @@ void InterpreterMacroAssembler::profile_obj_type(Register obj, const Address& md
+                   // do. The unknown bit may have been
+                   // set already but no need to check.
+ 
+-  andi(t0, obj, TypeEntries::type_unknown);
++  test_bit(t0, obj, exact_log2(TypeEntries::type_unknown));
+   bnez(t0, next);
+   // already unknown. Nothing to do anymore.
+ 
+@@ -1927,10 +1927,10 @@ void InterpreterMacroAssembler::get_method_counters(Register method,
+ }
+ 
+ #ifdef ASSERT
+-void InterpreterMacroAssembler::verify_access_flags(Register access_flags, uint32_t flag_bits,
++void InterpreterMacroAssembler::verify_access_flags(Register access_flags, uint32_t flag,
+                                                     const char* msg, bool stop_by_hit) {
+   Label L;
+-  andi(t0, access_flags, flag_bits);
++  test_bit(t0, access_flags, exact_log2(flag));
+   if (stop_by_hit) {
+     beqz(t0, L);
+   } else {
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.hpp b/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
+index 4d8cb086f82..eb23acf00cd 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.hpp
+@@ -276,7 +276,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
+   }
+ 
+ #ifdef ASSERT
+-  void verify_access_flags(Register access_flags, uint32_t flag_bits,
++  void verify_access_flags(Register access_flags, uint32_t flag,
+                            const char* msg, bool stop_by_hit = true);
+   void verify_frame_setup();
+ #endif
+diff --git a/src/hotspot/cpu/riscv/jniFastGetField_riscv.cpp b/src/hotspot/cpu/riscv/jniFastGetField_riscv.cpp
+index fef922f14a4..8a7a1d8378a 100644
+--- a/src/hotspot/cpu/riscv/jniFastGetField_riscv.cpp
++++ b/src/hotspot/cpu/riscv/jniFastGetField_riscv.cpp
+@@ -84,7 +84,7 @@ address JNI_FastGetField::generate_fast_get_int_field0(BasicType type) {
+   Address safepoint_counter_addr(rcounter_addr, 0);
+   __ lwu(rcounter, safepoint_counter_addr);
+   // An even value means there are no ongoing safepoint operations
+-  __ andi(t0, rcounter, 1);
++  __ test_bit(t0, rcounter, 0);
+   __ bnez(t0, slow);
+ 
+   if (JvmtiExport::can_post_field_access()) {
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index e345ccf372a..a23f1f897f8 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -531,7 +531,7 @@ void MacroAssembler::resolve_jobject(Register value, Register thread, Register t
+   beqz(value, done);           // Use NULL as-is.
+ 
+   // Test for jweak tag.
+-  andi(t0, value, JNIHandles::weak_tag_mask);
++  test_bit(t0, value, exact_log2(JNIHandles::weak_tag_mask));
+   beqz(t0, not_weak);
+ 
+   // Resolve jweak.
+@@ -2351,7 +2351,7 @@ void MacroAssembler::safepoint_poll(Label& slow_path, bool at_return, bool acqui
+   if (at_return) {
+     bgtu(in_nmethod ? sp : fp, t0, slow_path, true /* is_far */);
+   } else {
+-    andi(t0, t0, SafepointMechanism::poll_bit());
++    test_bit(t0, t0, exact_log2(SafepointMechanism::poll_bit()));
+     bnez(t0, slow_path, true /* is_far */);
+   }
+ }
+@@ -3823,7 +3823,7 @@ void MacroAssembler::multiply_to_len(Register x, Register xlen, Register y, Regi
+   if (AvoidUnalignedAccesses) {
+     // Check if x and y are both 8-byte aligned.
+     orr(t0, xlen, ylen);
+-    andi(t0, t0, 0x1);
++    test_bit(t0, t0, 0);
+     beqz(t0, L_multiply_64_x_64_loop);
+ 
+     multiply_32_x_32_loop(x, xstart, x_xstart, y, y_idx, z, carry, product, idx, kdx);
+@@ -4064,7 +4064,7 @@ address MacroAssembler::zero_words(Register ptr, Register cnt) {
+   bind(around);
+   for (int i = zero_words_block_size >> 1; i > 1; i >>= 1) {
+     Label l;
+-    andi(t0, cnt, i);
++    test_bit(t0, cnt, exact_log2(i));
+     beqz(t0, l);
+     for (int j = 0; j < i; j++) {
+       sd(zr, Address(ptr, 0));
+@@ -4074,7 +4074,7 @@ address MacroAssembler::zero_words(Register ptr, Register cnt) {
+   }
+   {
+     Label l;
+-    andi(t0, cnt, 1);
++    test_bit(t0, cnt, 0);
+     beqz(t0, l);
+     sd(zr, Address(ptr, 0));
+     bind(l);
+@@ -4388,3 +4388,12 @@ void MacroAssembler::cmp_l2i(Register dst, Register src1, Register src2, Registe
+   neg(dst, dst);
+   bind(done);
+ }
++
++void MacroAssembler::test_bit(Register Rd, Register Rs, uint32_t bit_pos, Register tmp) {
++  assert(bit_pos < 64, "invalid bit range");
++  if (UseZbs) {
++    bexti(Rd, Rs, bit_pos);
++    return;
++  }
++  andi(Rd, Rs, 1UL << bit_pos, tmp);
++}
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index 45b2f58f066..ec5bb3709f3 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -1131,6 +1131,9 @@ public:
+   // shift left by shamt and add
+   void shadd(Register Rd, Register Rs1, Register Rs2, Register tmp, int shamt);
+ 
++  // test single bit in Rs, result is set to Rd
++  void test_bit(Register Rd, Register Rs, uint32_t bit_pos, Register tmp = t0);
++
+   // Here the float instructions with safe deal with some exceptions.
+   // e.g. convert from NaN, +Inf, -Inf to int, float, double
+   // will trigger exception, we need to deal with these situations
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index f74f0feadb5..a9089bd971f 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -2318,7 +2318,7 @@ encode %{
+     if (DiagnoseSyncOnValueBasedClasses != 0) {
+       __ load_klass(flag, oop);
+       __ lwu(flag, Address(flag, Klass::access_flags_offset()));
+-      __ andi(flag, flag, JVM_ACC_IS_VALUE_BASED_CLASS, tmp /* tmp */);
++      __ test_bit(flag, flag, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS), tmp /* tmp */);
+       __ bnez(flag, cont, true /* is_far */);
+     }
+ 
+@@ -2327,7 +2327,7 @@ encode %{
+     }
+ 
+     // Check for existing monitor
+-    __ andi(t0, disp_hdr, markWord::monitor_value);
++    __ test_bit(t0, disp_hdr, exact_log2(markWord::monitor_value));
+     __ bnez(t0, object_has_monitor);
+ 
+     // Set tmp to be (markWord of object | UNLOCK_VALUE).
+@@ -2417,7 +2417,7 @@ encode %{
+ 
+     // Handle existing monitor.
+     __ ld(tmp, Address(oop, oopDesc::mark_offset_in_bytes()));
+-    __ andi(t0, tmp, markWord::monitor_value);
++    __ test_bit(t0, tmp, exact_log2(markWord::monitor_value));
+     __ bnez(t0, object_has_monitor);
+ 
+     // Check if it is still a light weight lock, this is true if we
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index d304f084808..4937c40a2a7 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -649,7 +649,7 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
+ 
+     { // Bypass the barrier for non-static methods
+       __ lwu(t0, Address(xmethod, Method::access_flags_offset()));
+-      __ andi(t1, t0, JVM_ACC_STATIC);
++      __ test_bit(t1, t0, exact_log2(JVM_ACC_STATIC));
+       __ beqz(t1, L_skip_barrier); // non-static
+     }
+ 
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index c7f00f3d890..40418816586 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -812,7 +812,7 @@ class StubGenerator: public StubCodeGenerator {
+ 
+     {
+       Label L1, L2;
+-      __ andi(t0, count, 4);
++      __ test_bit(t0, count, 2);
+       __ beqz(t0, L1);
+ 
+       __ ld(tmp_reg0, Address(s, 1 * unit));
+@@ -834,7 +834,7 @@ class StubGenerator: public StubCodeGenerator {
+         __ addi(d, d, bias);
+       }
+ 
+-      __ andi(t0, count, 2);
++      __ test_bit(t0, count, 1);
+       __ beqz(t0, L2);
+       if (direction == copy_backwards) {
+         __ addi(s, s, 2 * unit);
+@@ -1704,7 +1704,7 @@ class StubGenerator: public StubCodeGenerator {
+     __ beqz(t0, L_long_aligned);
+     __ andi(t0, t0, BytesPerInt - 1);
+     __ beqz(t0, L_int_aligned);
+-    __ andi(t0, t0, 1);
++    __ test_bit(t0, t0, 0);
+     __ beqz(t0, L_short_aligned);
+     __ j(RuntimeAddress(byte_copy_entry));
+ 
+@@ -1785,7 +1785,7 @@ class StubGenerator: public StubCodeGenerator {
+ 
+     // if [src_pos < 0] then return -1
+     // i.e. sign bit set
+-    __ andi(t0, src_pos, 1UL << 31);
++    __ test_bit(t0, src_pos, 31);
+     __ bnez(t0, L_failed);
+ 
+     // if [dst == NULL] then return -1
+@@ -1793,7 +1793,7 @@ class StubGenerator: public StubCodeGenerator {
+ 
+     // if [dst_pos < 0] then return -1
+     // i.e. sign bit set
+-    __ andi(t0, dst_pos, 1UL << 31);
++    __ test_bit(t0, dst_pos, 31);
+     __ bnez(t0, L_failed);
+ 
+     // registers used as temp
+@@ -1804,7 +1804,7 @@ class StubGenerator: public StubCodeGenerator {
+     // if [length < 0] then return -1
+     __ addw(scratch_length, length, zr);    // length (elements count, 32-bits value)
+     // i.e. sign bit set
+-    __ andi(t0, scratch_length, 1UL << 31);
++    __ test_bit(t0, scratch_length, 31);
+     __ bnez(t0, L_failed);
+ 
+     __ load_klass(scratch_src_klass, src);
+@@ -1844,7 +1844,7 @@ class StubGenerator: public StubCodeGenerator {
+ 
+     // if [src->is_Array() != NULL] then return -1
+     // i.e. (lh >= 0)
+-    __ andi(t0, lh, 1UL << 31);
++    __ test_bit(t0, lh, 31);
+     __ beqz(t0, L_failed);
+ 
+     // At this point, it is known to be a typeArray (array_tag 0x3).
+@@ -1895,9 +1895,9 @@ class StubGenerator: public StubCodeGenerator {
+     // The possible values of elsize are 0-3, i.e. exact_log2(element
+     // size in bytes).  We do a simple bitwise binary search.
+   __ BIND(L_copy_bytes);
+-    __ andi(t0, x22_elsize, 2);
++    __ test_bit(t0, x22_elsize, 1);
+     __ bnez(t0, L_copy_ints);
+-    __ andi(t0, x22_elsize, 1);
++    __ test_bit(t0, x22_elsize, 0);
+     __ bnez(t0, L_copy_shorts);
+     __ add(from, src, src_pos); // src_addr
+     __ add(to, dst, dst_pos); // dst_addr
+@@ -1911,7 +1911,7 @@ class StubGenerator: public StubCodeGenerator {
+     __ j(RuntimeAddress(short_copy_entry));
+ 
+   __ BIND(L_copy_ints);
+-    __ andi(t0, x22_elsize, 1);
++    __ test_bit(t0, x22_elsize, 0);
+     __ bnez(t0, L_copy_longs);
+     __ shadd(from, src_pos, src, t0, 2); // src_addr
+     __ shadd(to, dst_pos, dst, t0, 2); // dst_addr
+@@ -2086,7 +2086,7 @@ class StubGenerator: public StubCodeGenerator {
+       switch (t) {
+         case T_BYTE:
+           // One byte misalignment happens only for byte arrays.
+-          __ andi(t0, to, 1);
++          __ test_bit(t0, to, 0);
+           __ beqz(t0, L_skip_align1);
+           __ sb(value, Address(to, 0));
+           __ addi(to, to, 1);
+@@ -2095,7 +2095,7 @@ class StubGenerator: public StubCodeGenerator {
+           // Fallthrough
+         case T_SHORT:
+           // Two bytes misalignment happens only for byte and short (char) arrays.
+-          __ andi(t0, to, 2);
++          __ test_bit(t0, to, 1);
+           __ beqz(t0, L_skip_align2);
+           __ sh(value, Address(to, 0));
+           __ addi(to, to, 2);
+@@ -2104,7 +2104,7 @@ class StubGenerator: public StubCodeGenerator {
+           // Fallthrough
+         case T_INT:
+           // Align to 8 bytes, we know we are 4 byte aligned to start.
+-          __ andi(t0, to, 4);
++          __ test_bit(t0, to, 2);
+           __ beqz(t0, L_skip_align4);
+           __ sw(value, Address(to, 0));
+           __ addi(to, to, 4);
+@@ -2148,27 +2148,27 @@ class StubGenerator: public StubCodeGenerator {
+     __ bind(L_fill_elements);
+     switch (t) {
+       case T_BYTE:
+-        __ andi(t0, count, 1);
++        __ test_bit(t0, count, 0);
+         __ beqz(t0, L_fill_2);
+         __ sb(value, Address(to, 0));
+         __ addi(to, to, 1);
+         __ bind(L_fill_2);
+-        __ andi(t0, count, 2);
++        __ test_bit(t0, count, 1);
+         __ beqz(t0, L_fill_4);
+         __ sh(value, Address(to, 0));
+         __ addi(to, to, 2);
+         __ bind(L_fill_4);
+-        __ andi(t0, count, 4);
++        __ test_bit(t0, count, 2);
+         __ beqz(t0, L_exit2);
+         __ sw(value, Address(to, 0));
+         break;
+       case T_SHORT:
+-        __ andi(t0, count, 1);
++        __ test_bit(t0, count, 0);
+         __ beqz(t0, L_fill_4);
+         __ sh(value, Address(to, 0));
+         __ addi(to, to, 2);
+         __ bind(L_fill_4);
+-        __ andi(t0, count, 2);
++        __ test_bit(t0, count, 1);
+         __ beqz(t0, L_exit2);
+         __ sw(value, Address(to, 0));
+         break;
+@@ -3129,7 +3129,7 @@ class StubGenerator: public StubCodeGenerator {
+     void unroll_2(Register count, T block) {
+       Label loop, end, odd;
+       beqz(count, end);
+-      andi(t0, count, 0x1);
++      test_bit(t0, count, 0);
+       bnez(t0, odd);
+       align(16);
+       bind(loop);
+@@ -3145,7 +3145,7 @@ class StubGenerator: public StubCodeGenerator {
+     void unroll_2(Register count, T block, Register d, Register s, Register tmp) {
+       Label loop, end, odd;
+       beqz(count, end);
+-      andi(tmp, count, 0x1);
++      test_bit(tmp, count, 0);
+       bnez(tmp, odd);
+       align(16);
+       bind(loop);
+@@ -3396,7 +3396,7 @@ class StubGenerator: public StubCodeGenerator {
+     void last_squaring(Register i) {
+       Label dont;
+       // if ((i & 1) == 0) {
+-      andi(t0, i, 0x1);
++      test_bit(t0, i, 0);
+       bnez(t0, dont); {
+         // MACC(Ra, Rb, tmp0, tmp1, tmp2);
+         // Ra = *++Pa;
+diff --git a/src/hotspot/cpu/riscv/templateInterpreterGenerator_riscv.cpp b/src/hotspot/cpu/riscv/templateInterpreterGenerator_riscv.cpp
+index f9cdaf3439f..95fc27f9e71 100644
+--- a/src/hotspot/cpu/riscv/templateInterpreterGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/templateInterpreterGenerator_riscv.cpp
+@@ -114,7 +114,7 @@ address TemplateInterpreterGenerator::generate_slow_signature_handler() {
+     const FloatRegister r = g_FPArgReg[i];
+     Label d, done;
+ 
+-    __ andi(t0, c_rarg3, 1UL << i);
++    __ test_bit(t0, c_rarg3, i);
+     __ bnez(t0, d);
+     __ flw(r, Address(sp, (10 + i) * wordSize));
+     __ j(done);
+@@ -1044,7 +1044,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
+   {
+     Label L;
+     __ lwu(t, Address(xmethod, Method::access_flags_offset()));
+-    __ andi(t0, t, JVM_ACC_STATIC);
++    __ test_bit(t0, t, exact_log2(JVM_ACC_STATIC));
+     __ beqz(t0, L);
+     // get mirror
+     __ load_mirror(t, xmethod);
+@@ -1231,7 +1231,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
+   {
+     Label L;
+     __ lwu(t, Address(xmethod, Method::access_flags_offset()));
+-    __ andi(t0, t, JVM_ACC_SYNCHRONIZED);
++    __ test_bit(t0, t, exact_log2(JVM_ACC_SYNCHRONIZED));
+     __ beqz(t0, L);
+     // the code below should be shared with interpreter macro
+     // assembler implementation
+diff --git a/src/hotspot/cpu/riscv/templateTable_riscv.cpp b/src/hotspot/cpu/riscv/templateTable_riscv.cpp
+index bd22a395301..12d611eacf5 100644
+--- a/src/hotspot/cpu/riscv/templateTable_riscv.cpp
++++ b/src/hotspot/cpu/riscv/templateTable_riscv.cpp
+@@ -1153,7 +1153,7 @@ void TemplateTable::bastore()
+   __ load_klass(x12, x13);
+   __ lwu(x12, Address(x12, Klass::layout_helper_offset()));
+   Label L_skip;
+-  __ andi(t0, x12, Klass::layout_helper_boolean_diffbit());
++  __ test_bit(t0, x12, exact_log2(Klass::layout_helper_boolean_diffbit()));
+   __ beqz(t0, L_skip);
+   __ andi(x10, x10, 1);  // if it is a T_BOOLEAN array, mask the stored value to 0/1
+   __ bind(L_skip);
+@@ -2178,7 +2178,7 @@ void TemplateTable::_return(TosState state)
+     __ load_klass(x13, c_rarg1);
+     __ lwu(x13, Address(x13, Klass::access_flags_offset()));
+     Label skip_register_finalizer;
+-    __ andi(t0, x13, JVM_ACC_HAS_FINALIZER);
++    __ test_bit(t0, x13, exact_log2(JVM_ACC_HAS_FINALIZER));
+     __ beqz(t0, skip_register_finalizer);
+ 
+     __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::register_finalizer), c_rarg1);
+@@ -2543,7 +2543,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static, RewriteContr
+   __ bind(Done);
+ 
+   Label notVolatile;
+-  __ andi(t0, raw_flags, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++  __ test_bit(t0, raw_flags, ConstantPoolCacheEntry::is_volatile_shift);
+   __ beqz(t0, notVolatile);
+   __ membar(MacroAssembler::LoadLoad | MacroAssembler::LoadStore);
+   __ bind(notVolatile);
+@@ -2643,7 +2643,7 @@ void TemplateTable::putfield_or_static(int byte_no, bool is_static, RewriteContr
+ 
+   {
+     Label notVolatile;
+-    __ andi(t0, x15, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x15, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::StoreStore | MacroAssembler::LoadStore);
+     __ bind(notVolatile);
+@@ -2853,7 +2853,7 @@ void TemplateTable::putfield_or_static(int byte_no, bool is_static, RewriteContr
+ 
+   {
+     Label notVolatile;
+-    __ andi(t0, x15, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x15, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::StoreLoad | MacroAssembler::StoreStore);
+     __ bind(notVolatile);
+@@ -2957,7 +2957,7 @@ void TemplateTable::fast_storefield(TosState state)
+ 
+   {
+     Label notVolatile;
+-    __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x13, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::StoreStore | MacroAssembler::LoadStore);
+     __ bind(notVolatile);
+@@ -3005,7 +3005,7 @@ void TemplateTable::fast_storefield(TosState state)
+ 
+   {
+     Label notVolatile;
+-    __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x13, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::StoreLoad | MacroAssembler::StoreStore);
+     __ bind(notVolatile);
+@@ -3092,7 +3092,7 @@ void TemplateTable::fast_accessfield(TosState state)
+   }
+   {
+     Label notVolatile;
+-    __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x13, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::LoadLoad | MacroAssembler::LoadStore);
+     __ bind(notVolatile);
+@@ -3137,7 +3137,7 @@ void TemplateTable::fast_xaccess(TosState state)
+     Label notVolatile;
+     __ lwu(x13, Address(x12, in_bytes(ConstantPoolCache::base_offset() +
+                                       ConstantPoolCacheEntry::flags_offset())));
+-    __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_volatile_shift);
++    __ test_bit(t0, x13, ConstantPoolCacheEntry::is_volatile_shift);
+     __ beqz(t0, notVolatile);
+     __ membar(MacroAssembler::LoadLoad | MacroAssembler::LoadStore);
+     __ bind(notVolatile);
+@@ -3186,7 +3186,7 @@ void TemplateTable::prepare_invoke(int byte_no,
+   // maybe push appendix to arguments (just before return address)
+   if (is_invokedynamic || is_invokehandle) {
+     Label L_no_push;
+-    __ andi(t0, flags, 1UL << ConstantPoolCacheEntry::has_appendix_shift);
++    __ test_bit(t0, flags, ConstantPoolCacheEntry::has_appendix_shift);
+     __ beqz(t0, L_no_push);
+     // Push the appendix as a trailing parameter.
+     // This must be done before we get the receiver,
+@@ -3228,7 +3228,7 @@ void TemplateTable::invokevirtual_helper(Register index,
+   assert_different_registers(index, recv, x10, x13);
+   // Test for an invoke of a final method
+   Label notFinal;
+-  __ andi(t0, flags, 1UL << ConstantPoolCacheEntry::is_vfinal_shift);
++  __ test_bit(t0, flags, ConstantPoolCacheEntry::is_vfinal_shift);
+   __ beqz(t0, notFinal);
+ 
+   const Register method = index;  // method must be xmethod
+@@ -3325,7 +3325,7 @@ void TemplateTable::invokeinterface(int byte_no) {
+   // Special case of invokeinterface called for virtual method of
+   // java.lang.Object. See cpCache.cpp for details
+   Label notObjectMethod;
+-  __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_forced_virtual_shift);
++  __ test_bit(t0, x13, ConstantPoolCacheEntry::is_forced_virtual_shift);
+   __ beqz(t0, notObjectMethod);
+ 
+   invokevirtual_helper(xmethod, x12, x13);
+@@ -3335,7 +3335,7 @@ void TemplateTable::invokeinterface(int byte_no) {
+ 
+   // Check for private method invocation - indicated by vfinal
+   Label notVFinal;
+-  __ andi(t0, x13, 1UL << ConstantPoolCacheEntry::is_vfinal_shift);
++  __ test_bit(t0, x13, ConstantPoolCacheEntry::is_vfinal_shift);
+   __ beqz(t0, notVFinal);
+ 
+   // Check receiver klass into x13 - also a null check
+@@ -3507,7 +3507,7 @@ void TemplateTable::_new() {
+   // get instance_size in InstanceKlass (scaled to a count of bytes)
+   __ lwu(x13, Address(x14, Klass::layout_helper_offset()));
+   // test to see if it has a finalizer or is malformed in some way
+-  __ andi(t0, x13, Klass::_lh_instance_slow_path_bit);
++  __ test_bit(t0, x13, exact_log2(Klass::_lh_instance_slow_path_bit));
+   __ bnez(t0, slow_case);
+ 
+   // Allocate the instance:

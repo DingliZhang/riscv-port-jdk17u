@@ -1,0 +1,303 @@
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.cpp b/src/hotspot/cpu/riscv/assembler_riscv.cpp
+index 24576405934..7eb878d37cd 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.cpp
+@@ -50,7 +50,7 @@ void Assembler::add(Register Rd, Register Rn, int64_t increment, Register temp)
+   }
+ }
+ 
+-void Assembler::addw(Register Rd, Register Rn, int64_t increment, Register temp) {
++void Assembler::addw(Register Rd, Register Rn, int32_t increment, Register temp) {
+   if (is_imm_in_range(increment, 12, 0)) {
+     addiw(Rd, Rn, increment);
+   } else {
+@@ -70,7 +70,7 @@ void Assembler::sub(Register Rd, Register Rn, int64_t decrement, Register temp)
+   }
+ }
+ 
+-void Assembler::subw(Register Rd, Register Rn, int64_t decrement, Register temp) {
++void Assembler::subw(Register Rd, Register Rn, int32_t decrement, Register temp) {
+   if (is_imm_in_range(-decrement, 12, 0)) {
+     addiw(Rd, Rn, -decrement);
+   } else {
+@@ -117,30 +117,30 @@ void Assembler::_li(Register Rd, int64_t imm) {
+ }
+ 
+ void Assembler::li64(Register Rd, int64_t imm) {
+-   // Load upper 32 bits. upper = imm[63:32], but if imm[31] == 1 or
+-   // (imm[31:20] == 0x7ff && imm[19] == 1), upper = imm[63:32] + 1.
+-   int64_t lower = imm & 0xffffffff;
+-   lower -= ((lower << 44) >> 44);
+-   int64_t tmp_imm = ((uint64_t)(imm & 0xffffffff00000000)) + (uint64_t)lower;
+-   int32_t upper = (tmp_imm - (int32_t)lower) >> 32;
+-
+-   // Load upper 32 bits
+-   int64_t up = upper, lo = upper;
+-   lo = (lo << 52) >> 52;
+-   up -= lo;
+-   up = (int32_t)up;
+-   lui(Rd, up);
+-   addi(Rd, Rd, lo);
+-
+-   // Load the rest 32 bits.
+-   slli(Rd, Rd, 12);
+-   addi(Rd, Rd, (int32_t)lower >> 20);
+-   slli(Rd, Rd, 12);
+-   lower = ((int32_t)imm << 12) >> 20;
+-   addi(Rd, Rd, lower);
+-   slli(Rd, Rd, 8);
+-   lower = imm & 0xff;
+-   addi(Rd, Rd, lower);
++  // Load upper 32 bits. upper = imm[63:32], but if imm[31] == 1 or
++  // (imm[31:20] == 0x7ff && imm[19] == 1), upper = imm[63:32] + 1.
++  int64_t lower = imm & 0xffffffff;
++  lower -= ((lower << 44) >> 44);
++  int64_t tmp_imm = ((uint64_t)(imm & 0xffffffff00000000)) + (uint64_t)lower;
++  int32_t upper = (tmp_imm - (int32_t)lower) >> 32;
++
++  // Load upper 32 bits
++  int64_t up = upper, lo = upper;
++  lo = (lo << 52) >> 52;
++  up -= lo;
++  up = (int32_t)up;
++  lui(Rd, up);
++  addi(Rd, Rd, lo);
++
++  // Load the rest 32 bits.
++  slli(Rd, Rd, 12);
++  addi(Rd, Rd, (int32_t)lower >> 20);
++  slli(Rd, Rd, 12);
++  lower = ((int32_t)imm << 12) >> 20;
++  addi(Rd, Rd, lower);
++  slli(Rd, Rd, 8);
++  lower = imm & 0xff;
++  addi(Rd, Rd, lower);
+ }
+ 
+ void Assembler::li32(Register Rd, int32_t imm) {
+diff --git a/src/hotspot/cpu/riscv/assembler_riscv.hpp b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+index a12724d931a..d6b303e0b63 100644
+--- a/src/hotspot/cpu/riscv/assembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/assembler_riscv.hpp
+@@ -3044,11 +3044,12 @@ enum Nf {
+   void wrap_label(Register r, Label &L, Register t, load_insn_by_temp insn);
+   void wrap_label(Register r, Label &L, jal_jalr_insn insn);
+ 
+-  // calculate pseudoinstruction
++  // Computational pseudo instructions
+   void add(Register Rd, Register Rn, int64_t increment, Register temp = t0);
+-  void addw(Register Rd, Register Rn, int64_t increment, Register temp = t0);
++  void addw(Register Rd, Register Rn, int32_t increment, Register temp = t0);
++
+   void sub(Register Rd, Register Rn, int64_t decrement, Register temp = t0);
+-  void subw(Register Rd, Register Rn, int64_t decrement, Register temp = t0);
++  void subw(Register Rd, Register Rn, int32_t decrement, Register temp = t0);
+ 
+   // RVB pseudo instructions
+   // zero extend word
+diff --git a/src/hotspot/cpu/riscv/c1_CodeStubs_riscv.cpp b/src/hotspot/cpu/riscv/c1_CodeStubs_riscv.cpp
+index e0e2c1fb109..cedd97d4538 100644
+--- a/src/hotspot/cpu/riscv/c1_CodeStubs_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_CodeStubs_riscv.cpp
+@@ -343,7 +343,7 @@ void ArrayCopyStub::emit_code(LIR_Assembler* ce) {
+ #ifndef PRODUCT
+   if (PrintC1Statistics) {
+     __ la(t1, ExternalAddress((address)&Runtime1::_arraycopy_slowcase_cnt));
+-    __ add_memory_int32(Address(t1), 1);
++    __ incrementw(Address(t1));
+   }
+ #endif
+ 
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
+index b7f53e395f3..768cbed9fdd 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
+@@ -57,7 +57,7 @@ void LIR_Assembler::generic_arraycopy(Register src, Register src_pos, Register l
+   __ mv(c_rarg4, j_rarg4);
+ #ifndef PRODUCT
+   if (PrintC1Statistics) {
+-    __ add_memory_int32(ExternalAddress((address)&Runtime1::_generic_arraycopystub_cnt), 1);
++    __ incrementw(ExternalAddress((address)&Runtime1::_generic_arraycopystub_cnt));
+   }
+ #endif
+   __ far_call(RuntimeAddress(copyfunc_addr));
+@@ -164,7 +164,7 @@ void LIR_Assembler::arraycopy_checkcast(Register src, Register src_pos, Register
+   if (PrintC1Statistics) {
+     Label failed;
+     __ bnez(x10, failed);
+-    __ add_memory_int32(ExternalAddress((address)&Runtime1::_arraycopy_checkcast_cnt), 1);
++    __ incrementw(ExternalAddress((address)&Runtime1::_arraycopy_checkcast_cnt));
+     __ bind(failed);
+   }
+ #endif
+@@ -173,7 +173,7 @@ void LIR_Assembler::arraycopy_checkcast(Register src, Register src_pos, Register
+ 
+ #ifndef PRODUCT
+   if (PrintC1Statistics) {
+-    __ add_memory_int32(ExternalAddress((address)&Runtime1::_arraycopy_checkcast_attempt_cnt), 1);
++    __ incrementw(ExternalAddress((address)&Runtime1::_arraycopy_checkcast_attempt_cnt));
+   }
+ #endif
+   assert_different_registers(dst, dst_pos, length, src_pos, src, x10, t0);
+@@ -324,7 +324,7 @@ void LIR_Assembler::emit_arraycopy(LIR_OpArrayCopy* op) {
+ 
+ #ifndef PRODUCT
+   if (PrintC1Statistics) {
+-    __ add_memory_int32(ExternalAddress(Runtime1::arraycopy_count_address(basic_type)), 1);
++    __ incrementw(ExternalAddress(Runtime1::arraycopy_count_address(basic_type)));
+   }
+ #endif
+   arraycopy_prepare_params(src, src_pos, length, dst, dst_pos, basic_type);
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 0d65a968493..bab0aea5777 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1077,7 +1077,7 @@ void LIR_Assembler::type_profile_helper(Register mdo, ciMethodData *md, ciProfil
+     __ ld(t1, Address(mdo, md->byte_offset_of_slot(data, ReceiverTypeData::receiver_offset(i))));
+     __ bne(recv, t1, next_test);
+     Address data_addr(mdo, md->byte_offset_of_slot(data, ReceiverTypeData::receiver_count_offset(i)));
+-    __ add_memory_int64(data_addr, DataLayout::counter_increment);
++    __ increment(data_addr, DataLayout::counter_increment);
+     __ j(*update_done);
+     __ bind(next_test);
+   }
+@@ -1570,7 +1570,7 @@ void LIR_Assembler::emit_profile_call(LIR_OpProfileCall* op) {
+         ciKlass* receiver = vc_data->receiver(i);
+         if (known_klass->equals(receiver)) {
+           Address data_addr(mdo, md->byte_offset_of_slot(data, VirtualCallData::receiver_count_offset(i)));
+-          __ add_memory_int64(data_addr, DataLayout::counter_increment);
++          __ increment(data_addr, DataLayout::counter_increment);
+           return;
+         }
+       }
+@@ -1586,7 +1586,7 @@ void LIR_Assembler::emit_profile_call(LIR_OpProfileCall* op) {
+           __ mov_metadata(t1, known_klass->constant_encoding());
+           __ sd(t1, recv_addr);
+           Address data_addr(mdo, md->byte_offset_of_slot(data, VirtualCallData::receiver_count_offset(i)));
+-          __ add_memory_int64(data_addr, DataLayout::counter_increment);
++          __ increment(data_addr, DataLayout::counter_increment);
+           return;
+         }
+       }
+@@ -1596,13 +1596,13 @@ void LIR_Assembler::emit_profile_call(LIR_OpProfileCall* op) {
+       type_profile_helper(mdo, md, data, recv, &update_done);
+       // Receiver did not match any saved receiver and there is no empty row for it.
+       // Increment total counter to indicate polymorphic case.
+-      __ add_memory_int64(counter_addr, DataLayout::counter_increment);
++      __ increment(counter_addr, DataLayout::counter_increment);
+ 
+       __ bind(update_done);
+     }
+   } else {
+     // Static call
+-    __ add_memory_int64(counter_addr, DataLayout::counter_increment);
++    __ increment(counter_addr, DataLayout::counter_increment);
+   }
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 452f948cffc..7c987cd7d9d 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -3174,19 +3174,47 @@ Address MacroAssembler::add_memory_helper(const Address dst) {
+   }
+ }
+ 
+-void MacroAssembler::add_memory_int64(const Address dst, int64_t imm) {
++void MacroAssembler::increment(const Address dst, int64_t value) {
++  assert(((dst.getMode() == Address::base_plus_offset &&
++           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++          "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst);
+-  assert_different_registers(adr.base(), t0);
++  assert(!adr.uses(t0), "invalid dst for address increment");
+   ld(t0, adr);
+-  addi(t0, t0, imm);
++  add(t0, t0, value, t1);
+   sd(t0, adr);
+ }
+ 
+-void MacroAssembler::add_memory_int32(const Address dst, int32_t imm) {
++void MacroAssembler::incrementw(const Address dst, int32_t value) {
++  assert(((dst.getMode() == Address::base_plus_offset &&
++           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++          "invalid value and address mode combination");
+   Address adr = add_memory_helper(dst);
+-  assert_different_registers(adr.base(), t0);
++  assert(!adr.uses(t0), "invalid dst for address increment");
+   lwu(t0, adr);
+-  addiw(t0, t0, imm);
++  addw(t0, t0, value, t1);
++  sw(t0, adr);
++}
++
++void MacroAssembler::decrement(const Address dst, int64_t value) {
++  assert(((dst.getMode() == Address::base_plus_offset &&
++           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++          "invalid value and address mode combination");
++  Address adr = add_memory_helper(dst);
++  assert(!adr.uses(t0), "invalid dst for address decrement");
++  ld(t0, adr);
++  sub(t0, t0, value, t1);
++  sd(t0, adr);
++}
++
++void MacroAssembler::decrementw(const Address dst, int32_t value) {
++  assert(((dst.getMode() == Address::base_plus_offset &&
++           is_offset_in_range(dst.offset(), 12)) || is_imm_in_range(value, 12, 0)),
++          "invalid value and address mode combination");
++  Address adr = add_memory_helper(dst);
++  assert(!adr.uses(t0), "invalid dst for address decrement");
++  lwu(t0, adr);
++  subw(t0, t0, value, t1);
+   sw(t0, adr);
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index 95dc66ecc11..e7c71271fed 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -652,8 +652,19 @@ class MacroAssembler: public Assembler {
+   address trampoline_call(Address entry, CodeBuffer* cbuf = NULL);
+   address ic_call(address entry, jint method_index = 0);
+ 
+-  void add_memory_int64(const Address dst, int64_t imm);
+-  void add_memory_int32(const Address dst, int32_t imm);
++  // Support for memory inc/dec
++  // n.b. increment/decrement calls with an Address destination will
++  // need to use a scratch register to load the value to be
++  // incremented. increment/decrement calls which add or subtract a
++  // constant value other than sign-extended 12-bit immediate will need
++  // to use a 2nd scratch register to hold the constant. so, an address
++  // increment/decrement may trash both t0 and t1.
++
++  void increment(const Address dst, int64_t value = 1);
++  void incrementw(const Address dst, int32_t value = 1);
++
++  void decrement(const Address dst, int64_t value = 1);
++  void decrementw(const Address dst, int32_t value = 1);
+ 
+   void cmpptr(Register src1, Address src2, Label& equal);
+ 
+diff --git a/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp b/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
+index 78b81138003..cfba60d9fed 100644
+--- a/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
++++ b/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
+@@ -72,7 +72,7 @@ VtableStub* VtableStubs::create_vtable_stub(int vtable_index) {
+ #if (!defined(PRODUCT) && defined(COMPILER2))
+   if (CountCompiledCalls) {
+     __ la(t2, ExternalAddress((address) SharedRuntime::nof_megamorphic_calls_addr()));
+-    __ add_memory_int64(Address(t2), 1);
++    __ increment(Address(t2));
+   }
+ #endif
+ 
+@@ -163,7 +163,7 @@ VtableStub* VtableStubs::create_itable_stub(int itable_index) {
+ #if (!defined(PRODUCT) && defined(COMPILER2))
+   if (CountCompiledCalls) {
+     __ la(x18, ExternalAddress((address) SharedRuntime::nof_megamorphic_calls_addr()));
+-    __ add_memory_int64(Address(x18), 1);
++    __ increment(Address(x18));
+   }
+ #endif
+ 

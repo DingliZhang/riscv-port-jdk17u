@@ -1,0 +1,249 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 70674d01a47..4340a511f0c 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1222,7 +1222,7 @@ void LIR_Assembler::emit_typecheck_helper(LIR_OpTypeCheck *op, Label* success, L
+   if (op->fast_check()) {
+     // get object class
+     // not a safepoint as obj null check happens earlier
+-    __ load_klass(t0, obj);
++    __ load_klass(t0, obj, t1);
+     __ bne(t0, k_RInfo, *failure_target, /* is_far */ true);
+     // successful cast, fall through to profile or jump
+   } else {
+diff --git a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+index ae6961946c0..c04e885320d 100644
+--- a/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_MacroAssembler_riscv.cpp
+@@ -169,7 +169,7 @@ void C1_MacroAssembler::initialize_header(Register obj, Register klass, Register
+   sd(tmp1, Address(obj, oopDesc::mark_offset_in_bytes()));
+ 
+   if (UseCompressedClassPointers) { // Take care not to kill klass
+-    encode_klass_not_null(tmp1, klass);
++    encode_klass_not_null(tmp1, klass, tmp2);
+     sw(tmp1, Address(obj, oopDesc::klass_offset_in_bytes()));
+   } else {
+     sd(klass, Address(obj, oopDesc::klass_offset_in_bytes()));
+@@ -315,7 +315,8 @@ void C1_MacroAssembler::inline_cache_check(Register receiver, Register iCache, L
+   // explicit NULL check not needed since load from [klass_offset] causes a trap
+   // check against inline cache
+   assert(!MacroAssembler::needs_explicit_null_check(oopDesc::klass_offset_in_bytes()), "must add explicit null check");
+-  cmp_klass(receiver, iCache, t0, L);
++  assert_different_registers(receiver, iCache, t0, t2);
++  cmp_klass(receiver, iCache, t0, t2 /* call-clobbered t2 as a tmp */, L);
+ }
+ 
+ void C1_MacroAssembler::build_frame(int framesize, int bang_size_in_bytes) {
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 6a79752f3fa..29ffdd9873d 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -1941,19 +1941,20 @@ void MacroAssembler::orptr(Address adr, RegisterOrConstant src, Register tmp1, R
+   sd(tmp1, adr);
+ }
+ 
+-void MacroAssembler::cmp_klass(Register oop, Register trial_klass, Register tmp, Label &L) {
++void MacroAssembler::cmp_klass(Register oop, Register trial_klass, Register tmp1, Register tmp2, Label &L) {
++  assert_different_registers(oop, trial_klass, tmp1, tmp2);
+   if (UseCompressedClassPointers) {
+-      lwu(tmp, Address(oop, oopDesc::klass_offset_in_bytes()));
++    lwu(tmp1, Address(oop, oopDesc::klass_offset_in_bytes()));
+     if (CompressedKlassPointers::base() == NULL) {
+-      slli(tmp, tmp, CompressedKlassPointers::shift());
+-      beq(trial_klass, tmp, L);
++      slli(tmp1, tmp1, CompressedKlassPointers::shift());
++      beq(trial_klass, tmp1, L);
+       return;
+     }
+-    decode_klass_not_null(tmp);
++    decode_klass_not_null(tmp1, tmp2);
+   } else {
+-    ld(tmp, Address(oop, oopDesc::klass_offset_in_bytes()));
++    ld(tmp1, Address(oop, oopDesc::klass_offset_in_bytes()));
+   }
+-  beq(trial_klass, tmp, L);
++  beq(trial_klass, tmp1, L);
+ }
+ 
+ // Move an oop into a register. immediate is true if we want
+@@ -2134,20 +2135,22 @@ void MacroAssembler::encode_heap_oop(Register d, Register s) {
+   }
+ }
+ 
+-void MacroAssembler::load_klass(Register dst, Register src) {
++void MacroAssembler::load_klass(Register dst, Register src, Register tmp) {
++  assert_different_registers(dst, tmp);
++  assert_different_registers(src, tmp);
+   if (UseCompressedClassPointers) {
+     lwu(dst, Address(src, oopDesc::klass_offset_in_bytes()));
+-    decode_klass_not_null(dst);
++    decode_klass_not_null(dst, tmp);
+   } else {
+     ld(dst, Address(src, oopDesc::klass_offset_in_bytes()));
+   }
+ }
+ 
+-void MacroAssembler::store_klass(Register dst, Register src) {
++void MacroAssembler::store_klass(Register dst, Register src, Register tmp) {
+   // FIXME: Should this be a store release? concurrent gcs assumes
+   // klass length is valid if klass field is not null.
+   if (UseCompressedClassPointers) {
+-    encode_klass_not_null(src);
++    encode_klass_not_null(src, tmp);
+     sw(src, Address(dst, oopDesc::klass_offset_in_bytes()));
+   } else {
+     sd(src, Address(dst, oopDesc::klass_offset_in_bytes()));
+@@ -2161,8 +2164,9 @@ void MacroAssembler::store_klass_gap(Register dst, Register src) {
+   }
+ }
+ 
+-void  MacroAssembler::decode_klass_not_null(Register r) {
+-  decode_klass_not_null(r, r);
++void MacroAssembler::decode_klass_not_null(Register r, Register tmp) {
++  assert_different_registers(r, tmp);
++  decode_klass_not_null(r, r, tmp);
+ }
+ 
+ void MacroAssembler::decode_klass_not_null(Register dst, Register src, Register tmp) {
+@@ -2193,12 +2197,11 @@ void MacroAssembler::decode_klass_not_null(Register dst, Register src, Register
+   } else {
+     add(dst, xbase, src);
+   }
+-
+-  if (xbase == xheapbase) { reinit_heapbase(); }
+ }
+ 
+-void MacroAssembler::encode_klass_not_null(Register r) {
+-  encode_klass_not_null(r, r);
++void MacroAssembler::encode_klass_not_null(Register r, Register tmp) {
++  assert_different_registers(r, tmp);
++  encode_klass_not_null(r, r, tmp);
+ }
+ 
+ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register tmp) {
+@@ -2232,9 +2235,6 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+     assert(LogKlassAlignmentInBytes == CompressedKlassPointers::shift(), "decode alg wrong");
+     srli(dst, dst, LogKlassAlignmentInBytes);
+   }
+-  if (xbase == xheapbase) {
+-    reinit_heapbase();
+-  }
+ }
+ 
+ void  MacroAssembler::decode_heap_oop_not_null(Register r) {
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index b1c47e80f74..3aff895560b 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -192,15 +192,15 @@ class MacroAssembler: public Assembler {
+   void access_load_at(BasicType type, DecoratorSet decorators, Register dst,
+                       Address src, Register tmp1, Register tmp2);
+   void access_store_at(BasicType type, DecoratorSet decorators, Address dst,
+-                       Register src, Register tmp1, Register tmp2, Register tmp3);
+-  void load_klass(Register dst, Register src);
+-  void store_klass(Register dst, Register src);
+-  void cmp_klass(Register oop, Register trial_klass, Register tmp, Label &L);
+-
+-  void encode_klass_not_null(Register r);
+-  void decode_klass_not_null(Register r);
+-  void encode_klass_not_null(Register dst, Register src, Register tmp = xheapbase);
+-  void decode_klass_not_null(Register dst, Register src, Register tmp = xheapbase);
++                       Register val, Register tmp1, Register tmp2, Register tmp3);
++  void load_klass(Register dst, Register src, Register tmp = t0);
++  void store_klass(Register dst, Register src, Register tmp = t0);
++  void cmp_klass(Register oop, Register trial_klass, Register tmp1, Register tmp2, Label &L);
++
++  void encode_klass_not_null(Register r, Register tmp = t0);
++  void decode_klass_not_null(Register r, Register tmp = t0);
++  void encode_klass_not_null(Register dst, Register src, Register tmp);
++  void decode_klass_not_null(Register dst, Register src, Register tmp);
+   void decode_heap_oop_not_null(Register r);
+   void decode_heap_oop_not_null(Register dst, Register src);
+   void decode_heap_oop(Register d, Register s);
+diff --git a/src/hotspot/cpu/riscv/methodHandles_riscv.cpp b/src/hotspot/cpu/riscv/methodHandles_riscv.cpp
+index 3300027b87a..f8082feb07a 100644
+--- a/src/hotspot/cpu/riscv/methodHandles_riscv.cpp
++++ b/src/hotspot/cpu/riscv/methodHandles_riscv.cpp
+@@ -71,23 +71,23 @@ void MethodHandles::verify_klass(MacroAssembler* _masm,
+                                  const char* error_message) {
+   InstanceKlass** klass_addr = vmClasses::klass_addr_at(klass_id);
+   Klass* klass = vmClasses::klass_at(klass_id);
+-  Register temp = t1;
++  Register temp1 = t1;
+   Register temp2 = t0; // used by MacroAssembler::cmpptr
+   Label L_ok, L_bad;
+   BLOCK_COMMENT("verify_klass {");
+   __ verify_oop(obj);
+   __ beqz(obj, L_bad);
+-  __ push_reg(RegSet::of(temp, temp2), sp);
+-  __ load_klass(temp, obj);
+-  __ cmpptr(temp, ExternalAddress((address) klass_addr), L_ok);
++  __ push_reg(RegSet::of(temp1, temp2), sp);
++  __ load_klass(temp1, obj, temp2);
++  __ cmpptr(temp1, ExternalAddress((address) klass_addr), L_ok);
+   intptr_t super_check_offset = klass->super_check_offset();
+-  __ ld(temp, Address(temp, super_check_offset));
+-  __ cmpptr(temp, ExternalAddress((address) klass_addr), L_ok);
+-  __ pop_reg(RegSet::of(temp, temp2), sp);
++  __ ld(temp1, Address(temp1, super_check_offset));
++  __ cmpptr(temp1, ExternalAddress((address) klass_addr), L_ok);
++  __ pop_reg(RegSet::of(temp1, temp2), sp);
+   __ bind(L_bad);
+   __ stop(error_message);
+   __ BIND(L_ok);
+-  __ pop_reg(RegSet::of(temp, temp2), sp);
++  __ pop_reg(RegSet::of(temp1, temp2), sp);
+   BLOCK_COMMENT("} verify_klass");
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index 505c13bff4d..b789124899e 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -1722,7 +1722,7 @@ void MachUEPNode::emit(CodeBuffer& cbuf, PhaseRegAlloc* ra_) const
+   C2_MacroAssembler _masm(&cbuf);
+ 
+   Label skip;
+-  __ cmp_klass(j_rarg0, t1, t0, skip);
++  __ cmp_klass(j_rarg0, t1, t0, t2 /* call-clobbered t2 as a tmp */, skip);
+   __ far_jump(RuntimeAddress(SharedRuntime::get_ic_miss_stub()));
+   __ bind(skip);
+ 
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index c77fb686bbd..6c485248711 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -610,7 +610,7 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
+ 
+   {
+     __ block_comment("c2i_unverified_entry {");
+-    __ load_klass(t0, receiver);
++    __ load_klass(t0, receiver, tmp);
+     __ ld(tmp, Address(holder, CompiledICHolder::holder_klass_offset()));
+     __ ld(xmethod, Address(holder, CompiledICHolder::holder_metadata_offset()));
+     __ beq(t0, tmp, ok);
+@@ -1203,9 +1203,9 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
+   Label hit;
+   Label exception_pending;
+ 
+-  assert_different_registers(ic_reg, receiver, t0);
+   __ verify_oop(receiver);
+-  __ cmp_klass(receiver, ic_reg, t0, hit);
++  assert_different_registers(ic_reg, receiver, t0, t2);
++  __ cmp_klass(receiver, ic_reg, t0, t2 /* call-clobbered t2 as a tmp */, hit);
+ 
+   __ far_jump(RuntimeAddress(SharedRuntime::get_ic_miss_stub()));
+ 
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index 2ccd212e0a9..73a81939d24 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -1776,7 +1776,7 @@ class StubGenerator: public StubCodeGenerator {
+       __ bind(L1);
+       __ stop("broken null klass");
+       __ bind(L2);
+-      __ load_klass(t0, dst);
++      __ load_klass(t0, dst, t1);
+       __ beqz(t0, L1);     // this would be broken also
+       BLOCK_COMMENT("} assert klasses not null done");
+     }

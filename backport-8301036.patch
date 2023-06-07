@@ -1,0 +1,193 @@
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+index b885199021c..f9de5a7de1e 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+@@ -260,7 +260,7 @@ void InterpreterMacroAssembler::get_cache_entry_pointer_at_bcp(Register cache,
+                                                                Register tmp,
+                                                                int bcp_offset,
+                                                                size_t index_size) {
+-  assert(cache != tmp, "must use different register");
++  assert_different_registers(cache, tmp);
+   get_cache_index_at_bcp(tmp, bcp_offset, index_size);
+   assert(sizeof(ConstantPoolCacheEntry) == 4 * wordSize, "adjust code below");
+   // Convert from field index to ConstantPoolCacheEntry index
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 3346d863139..1e795d2cf72 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -648,33 +648,6 @@ void MacroAssembler::super_call_VM_leaf(address entry_point, Register arg_0, Reg
+   MacroAssembler::call_VM_leaf_base(entry_point, 4);
+ }
+ 
+-void MacroAssembler::baseOffset32(Register Rd, const Address &adr, int32_t &offset) {
+-  assert(Rd != noreg, "Rd must not be empty register!");
+-  guarantee(Rd != adr.base(), "should use different registers!");
+-  if (is_offset_in_range(adr.offset(), 32)) {
+-    int32_t imm = adr.offset();
+-    int32_t upper = imm, lower = imm;
+-    lower = (imm << 20) >> 20;
+-    upper -= lower;
+-    lui(Rd, upper);
+-    offset = lower;
+-  } else {
+-    offset = ((int32_t)adr.offset() << 20) >> 20;
+-    li(Rd, adr.offset() - offset);
+-  }
+-  add(Rd, Rd, adr.base());
+-}
+-
+-void MacroAssembler::baseOffset(Register Rd, const Address &adr, int32_t &offset) {
+-  if (is_offset_in_range(adr.offset(), 12)) {
+-    assert(Rd != noreg, "Rd must not be empty register!");
+-    addi(Rd, adr.base(), adr.offset());
+-    offset = 0;
+-  } else {
+-    baseOffset32(Rd, adr, offset);
+-  }
+-}
+-
+ void MacroAssembler::la(Register Rd, const address dest) {
+   int64_t offset = dest - pc();
+   if (is_offset_in_range(offset, 32)) {
+@@ -699,9 +672,10 @@ void MacroAssembler::la(Register Rd, const Address &adr) {
+       break;
+     }
+     case Address::base_plus_offset: {
+-      int32_t offset = 0;
+-      baseOffset(Rd, adr, offset);
+-      addi(Rd, Rd, offset);
++      Address new_adr = legitimize_address(Rd, adr);
++      if (!(new_adr.base() == Rd && new_adr.offset() == 0)) {
++        addi(Rd, new_adr.base(), new_adr.offset());
++      }
+       break;
+     }
+     default:
+@@ -798,7 +772,7 @@ void MacroAssembler::li(Register Rd, int64_t imm) {
+     if (is_imm_in_range(distance, 20, 1)) {                        \
+       Assembler::jal(REGISTER, distance);                          \
+     } else {                                                       \
+-      assert(temp != noreg, "temp must not be empty register!");   \
++      assert(temp != noreg, "expecting a register");               \
+       int32_t offset = 0;                                          \
+       movptr(temp, dest, offset);                                  \
+       Assembler::jalr(REGISTER, temp, offset);                     \
+@@ -819,8 +793,8 @@ void MacroAssembler::li(Register Rd, int64_t imm) {
+         break;                                                     \
+       }                                                            \
+       case Address::base_plus_offset: {                            \
+-        int32_t offset = 0;                                        \
+-        baseOffset(temp, adr, offset);                             \
++        int32_t offset = ((int32_t)adr.offset() << 20) >> 20;      \
++        la(temp, Address(adr.base(), adr.offset() - offset));      \
+         Assembler::jalr(REGISTER, temp, offset);                   \
+         break;                                                     \
+       }                                                            \
+@@ -2345,11 +2319,13 @@ void MacroAssembler::membar(uint32_t order_constraint) {
+ // actually be used: you must use the Address that is returned. It
+ // is up to you to ensure that the shift provided mathces the size
+ // of your data.
+-Address MacroAssembler::form_address(Register Rd, Register base, long byte_offset) {
++Address MacroAssembler::form_address(Register Rd, Register base, int64_t byte_offset) {
+   if (is_offset_in_range(byte_offset, 12)) { // 12: imm in range 2^12
+     return Address(base, byte_offset);
+   }
+ 
++  assert_different_registers(Rd, base, noreg);
++
+   // Do it the hard way
+   mv(Rd, byte_offset);
+   add(Rd, base, Rd);
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index daa585b63a3..8a1482880e3 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -261,7 +261,18 @@ class MacroAssembler: public Assembler {
+   // actually be used: you must use the Address that is returned. It
+   // is up to you to ensure that the shift provided mathces the size
+   // of your data.
+-  Address form_address(Register Rd, Register base, long byte_offset);
++  Address form_address(Register Rd, Register base, int64_t byte_offset);
++
++  // Sometimes we get misaligned loads and stores, usually from Unsafe
++  // accesses, and these can exceed the offset range.
++  Address legitimize_address(Register Rd, const Address &adr) {
++    if (adr.getMode() == Address::base_plus_offset) {
++      if (!is_offset_in_range(adr.offset(), 12)) {
++        return form_address(Rd, adr.base(), adr.offset());
++      }
++    }
++    return adr;
++  }
+ 
+   // allocation
+   void tlab_allocate(
+@@ -648,9 +659,6 @@ public:
+                   compare_and_branch_insn insn,
+                   compare_and_branch_label_insn neg_insn, bool is_far = false);
+ 
+-  void baseOffset(Register Rd, const Address &adr, int32_t &offset);
+-  void baseOffset32(Register Rd, const Address &adr, int32_t &offset);
+-
+   void la(Register Rd, Label &label);
+   void la(Register Rd, const address dest);
+   void la(Register Rd, const Address &adr);
+@@ -772,12 +780,12 @@ public:
+         if (is_offset_in_range(adr.offset(), 12)) {                                                \
+           Assembler::NAME(Rd, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+-          int32_t offset = 0;                                                                      \
++          int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
+           if (Rd == adr.base()) {                                                                  \
+-            baseOffset32(temp, adr, offset);                                                       \
++            la(temp, Address(adr.base(), adr.offset() - offset));                                  \
+             Assembler::NAME(Rd, temp, offset);                                                     \
+           } else {                                                                                 \
+-            baseOffset32(Rd, adr, offset);                                                         \
++            la(Rd, Address(adr.base(), adr.offset() - offset));                                    \
+             Assembler::NAME(Rd, Rd, offset);                                                       \
+           }                                                                                        \
+         }                                                                                          \
+@@ -829,8 +837,8 @@ public:
+         if (is_offset_in_range(adr.offset(), 12)) {                                                \
+           Assembler::NAME(Rd, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+-          int32_t offset = 0;                                                                      \
+-          baseOffset32(temp, adr, offset);                                                         \
++          int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
++          la(temp, Address(adr.base(), adr.offset() - offset));                                    \
+           Assembler::NAME(Rd, temp, offset);                                                       \
+         }                                                                                          \
+         break;                                                                                     \
+@@ -886,9 +894,9 @@ public:
+         if (is_offset_in_range(adr.offset(), 12)) {                                                \
+           Assembler::NAME(Rs, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+-          int32_t offset= 0;                                                                       \
+           assert_different_registers(Rs, temp);                                                    \
+-          baseOffset32(temp, adr, offset);                                                         \
++          int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
++          la(temp, Address(adr.base(), adr.offset() - offset));                                    \
+           Assembler::NAME(Rs, temp, offset);                                                       \
+         }                                                                                          \
+         break;                                                                                     \
+@@ -929,8 +937,8 @@ public:
+         if (is_offset_in_range(adr.offset(), 12)) {                                                \
+           Assembler::NAME(Rs, adr.base(), adr.offset());                                           \
+         } else {                                                                                   \
+-          int32_t offset = 0;                                                                      \
+-          baseOffset32(temp, adr, offset);                                                         \
++          int32_t offset = ((int32_t)adr.offset() << 20) >> 20;                                    \
++          la(temp, Address(adr.base(), adr.offset() - offset));                                    \
+           Assembler::NAME(Rs, temp, offset);                                                       \
+         }                                                                                          \
+         break;                                                                                     \
+@@ -1227,7 +1235,7 @@ public:
+ 
+   void call(const address dest, Register temp = t0) {
+     assert_cond(dest != NULL);
+-    assert(temp != noreg, "temp must not be empty register!");
++    assert(temp != noreg, "expecting a register");
+     int32_t offset = 0;
+     mv(temp, dest, offset);
+     jalr(x1, temp, offset);

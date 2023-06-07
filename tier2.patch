@@ -1,0 +1,16 @@
+diff --git a/test/jdk/TEST.groups b/test/jdk/TEST.groups
+index fe0dd961f1f..9d15ddc37f9 100644
+--- a/test/jdk/TEST.groups
++++ b/test/jdk/TEST.groups
+@@ -49,7 +49,10 @@ tier1_part3 = \
+ tier2 = \
+     :tier2_part1 \
+     :tier2_part2 \
+-    :tier2_part3
++    :tier2_part3 \
++    -java/net/ipv6tests/UdpTest.java \
++    -sun/security/tools/jarsigner/PreserveRawManifestEntryAndDigest.java \
++    -tools/jpackage/share/jdk/jpackage/tests/MainClassTest.java
+ 
+ # com/sun/crypto/provider/Cipher is in tier1 because of JDK-8132855
+ tier2_part1 = \

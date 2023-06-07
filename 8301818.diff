@@ -1,0 +1,271 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
+index e6b95d3b7f14..e092850f2a95 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_arraycopy_riscv.cpp
+@@ -150,7 +150,7 @@ void LIR_Assembler::arraycopy_checkcast(Register src, Register src_pos, Register
+     Address klass_lh_addr(tmp, lh_offset);
+     jint objArray_lh = Klass::array_layout_helper(T_OBJECT);
+     __ lw(t0, klass_lh_addr);
+-    __ mvw(t1, objArray_lh);
++    __ mv(t1, objArray_lh);
+     __ bne(t0, t1, *stub->entry(), /* is_far */ true);
+   }
+ 
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index 33e6c9ad1e32..f234697ab89f 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -450,7 +450,7 @@ void LIR_Assembler::const2reg(LIR_Opr src, LIR_Opr dest, LIR_PatchCode patch_cod
+   switch (c->type()) {
+     case T_INT:
+       assert(patch_code == lir_patch_none, "no patching handled here");
+-      __ mvw(dest->as_register(), c->as_jint());
++      __ mv(dest->as_register(), c->as_jint());
+       break;
+ 
+     case T_ADDRESS:
+@@ -518,7 +518,7 @@ void LIR_Assembler::const2stack(LIR_Opr src, LIR_Opr dest) {
+       if (c->as_jint_bits() == 0) {
+         __ sw(zr, frame_map()->address_for_slot(dest->single_stack_ix()));
+       } else {
+-        __ mvw(t1, c->as_jint_bits());
++        __ mv(t1, c->as_jint_bits());
+         __ sw(t1, frame_map()->address_for_slot(dest->single_stack_ix()));
+       }
+       break;
+@@ -1001,7 +1001,7 @@ void LIR_Assembler::emit_alloc_obj(LIR_OpAllocObj* op) {
+   if (op->init_check()) {
+     __ lbu(t0, Address(op->klass()->as_register(),
+                        InstanceKlass::init_state_offset()));
+-    __ mvw(t1, InstanceKlass::fully_initialized);
++    __ mv(t1, InstanceKlass::fully_initialized);
+     add_debug_info_for_null_check_here(op->stub()->info());
+     __ bne(t0, t1, *op->stub()->entry(), /* is_far */ true);
+   }
+diff --git a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+index 8028950960ca..b083e904d5c1 100644
+--- a/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
++++ b/src/hotspot/cpu/riscv/interp_masm_riscv.cpp
+@@ -146,7 +146,7 @@ void InterpreterMacroAssembler::load_earlyret_value(TosState state) {
+       ShouldNotReachHere();
+   }
+   // Clean up tos value in the thread object
+-  mvw(t0, (int) ilgl);
++  mv(t0, (int)ilgl);
+   sw(t0, tos_addr);
+   sw(zr, val_addr);
+ }
+@@ -1497,8 +1497,8 @@ void InterpreterMacroAssembler::profile_switch_case(Register index,
+ 
+     // Build the base (index * per_case_size_in_bytes()) +
+     // case_array_offset_in_bytes()
+-    mvw(reg2, in_bytes(MultiBranchData::per_case_size()));
+-    mvw(t0, in_bytes(MultiBranchData::case_array_offset()));
++    mv(reg2, in_bytes(MultiBranchData::per_case_size()));
++    mv(t0, in_bytes(MultiBranchData::case_array_offset()));
+     Assembler::mul(index, index, reg2);
+     Assembler::add(index, index, t0);
+ 
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 62a4b38293ff..19b47a5cea6b 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -2170,7 +2170,7 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+   }
+ }
+ 
+-void  MacroAssembler::decode_heap_oop_not_null(Register r) {
++void MacroAssembler::decode_heap_oop_not_null(Register r) {
+   decode_heap_oop_not_null(r, r);
+ }
+ 
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+index 3627c9079c40..0d5a98292529 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.hpp
+@@ -691,7 +691,7 @@ class MacroAssembler: public Assembler {
+ 
+   void li32(Register Rd, int32_t imm);
+   void li64(Register Rd, int64_t imm);
+-  void li(Register Rd, int64_t imm);  // optimized load immediate
++  void li  (Register Rd, int64_t imm);  // optimized load immediate
+ 
+   // mv
+   void mv(Register Rd, address addr)                  { li(Rd, (int64_t)addr); }
+@@ -705,8 +705,6 @@ class MacroAssembler: public Assembler {
+   template<typename T, ENABLE_IF(std::is_integral<T>::value)>
+   inline void mv(Register Rd, T o)                    { li(Rd, (int64_t)o); }
+ 
+-  inline void mvw(Register Rd, int32_t imm32)         { mv(Rd, imm32); }
+-
+   void mv(Register Rd, Address dest) {
+     assert(dest.getMode() == Address::literal, "Address mode should be Address::literal");
+     relocate(dest.rspec(), [&] {
+diff --git a/src/hotspot/cpu/riscv/riscv.ad b/src/hotspot/cpu/riscv/riscv.ad
+index a7a8214e0a84..7cb795099bf8 100644
+--- a/src/hotspot/cpu/riscv/riscv.ad
++++ b/src/hotspot/cpu/riscv/riscv.ad
+@@ -3898,9 +3898,9 @@ opclass memory(indirect, indOffI, indOffL, indirectN, indOffIN, indOffLN);
+ // n.b. this does not elide all L2I conversions. if the truncated
+ // value is consumed by more than one operation then the ConvL2I
+ // cannot be bundled into the consuming nodes so an l2i gets planted
+-// (actually a mvw $dst $src) and the downstream instructions consume
+-// the result of the l2i as an iRegI input. That's a shame since the
+-// mvw is actually redundant but its not too costly.
++// (actually an addiw $dst, $src, 0) and the downstream instructions
++// consume the result of the L2I as an iRegI input. That's a shame since
++// the addiw is actually redundant but its not too costly.
+ 
+ opclass iRegIorL2I(iRegI, iRegL2I);
+ opclass iRegIorL(iRegI, iRegL);
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index 71930240ac55..dfa0d4b48d5c 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -430,7 +430,7 @@ static void gen_c2i_adapter(MacroAssembler *masm,
+ 
+         // Two VMREgs|OptoRegs can be T_OBJECT, T_ADDRESS, T_DOUBLE, T_LONG
+         // T_DOUBLE and T_LONG use two slots in the interpreter
+-        if ( sig_bt[i] == T_LONG || sig_bt[i] == T_DOUBLE) {
++        if (sig_bt[i] == T_LONG || sig_bt[i] == T_DOUBLE) {
+           // ld_off == LSW, ld_off+wordSize == MSW
+           // st_off == MSW, next_off == LSW
+           __ sd(t0, Address(sp, next_off), /*temp register*/esp);
+@@ -886,7 +886,7 @@ static OopMap* continuation_enter_setup(MacroAssembler* masm, int& stack_slots)
+ //          c_rarg3 -- isVirtualThread
+ static void fill_continuation_entry(MacroAssembler* masm) {
+ #ifdef ASSERT
+-  __ mvw(t0, ContinuationEntry::cookie_value());
++  __ mv(t0, ContinuationEntry::cookie_value());
+   __ sw(t0, Address(sp, ContinuationEntry::cookie_offset()));
+ #endif
+ 
+@@ -2099,7 +2099,7 @@ void SharedRuntime::generate_deopt_blob() {
+   map = reg_saver.save_live_registers(masm, 0, &frame_size_in_words);
+ 
+   // Normal deoptimization.  Save exec mode for unpack_frames.
+-  __ mvw(xcpool, Deoptimization::Unpack_deopt); // callee-saved
++  __ mv(xcpool, Deoptimization::Unpack_deopt); // callee-saved
+   __ j(cont);
+ 
+   int reexecute_offset = __ pc() - start;
+@@ -2116,7 +2116,7 @@ void SharedRuntime::generate_deopt_blob() {
+   // No need to update map as each call to save_live_registers will produce identical oopmap
+   (void) reg_saver.save_live_registers(masm, 0, &frame_size_in_words);
+ 
+-  __ mvw(xcpool, Deoptimization::Unpack_reexecute); // callee-saved
++  __ mv(xcpool, Deoptimization::Unpack_reexecute); // callee-saved
+   __ j(cont);
+ 
+ #if INCLUDE_JVMCI
+@@ -2139,10 +2139,10 @@ void SharedRuntime::generate_deopt_blob() {
+     __ set_last_Java_frame(sp, noreg, retaddr, t0);
+ 
+     __ lw(c_rarg1, Address(xthread, in_bytes(JavaThread::pending_deoptimization_offset())));
+-    __ mvw(t0, -1);
++    __ mv(t0, -1);
+     __ sw(t0, Address(xthread, in_bytes(JavaThread::pending_deoptimization_offset())));
+ 
+-    __ mvw(xcpool, (int32_t)Deoptimization::Unpack_reexecute);
++    __ mv(xcpool, (int32_t)Deoptimization::Unpack_reexecute);
+     __ mv(c_rarg0, xthread);
+     __ orrw(c_rarg2, zr, xcpool); // exec mode
+     RuntimeAddress target(CAST_FROM_FN_PTR(address, Deoptimization::uncommon_trap));
+@@ -2483,7 +2483,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+   // n.b. 3 gp args, 0 fp args, integral return type
+ 
+   __ mv(c_rarg0, xthread);
+-  __ mvw(c_rarg2, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg2, (unsigned)Deoptimization::Unpack_uncommon_trap);
+   RuntimeAddress target(CAST_FROM_FN_PTR(address, Deoptimization::uncommon_trap));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+@@ -2509,7 +2509,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+ #ifdef ASSERT
+   { Label L;
+     __ lwu(t0, Address(x14, Deoptimization::UnrollBlock::unpack_kind_offset_in_bytes()));
+-    __ mvw(t1, Deoptimization::Unpack_uncommon_trap);
++    __ mv(t1, Deoptimization::Unpack_uncommon_trap);
+     __ beq(t0, t1, L);
+     __ stop("SharedRuntime::generate_uncommon_trap_blob: expected Unpack_uncommon_trap");
+     __ bind(L);
+@@ -2610,7 +2610,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+ 
+   // sp should already be aligned
+   __ mv(c_rarg0, xthread);
+-  __ mvw(c_rarg1, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg1, (unsigned)Deoptimization::Unpack_uncommon_trap);
+   target = RuntimeAddress(CAST_FROM_FN_PTR(address, Deoptimization::unpack_frames));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index 080f1956d506..7a33edb9f81c 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -1849,7 +1849,7 @@ class StubGenerator: public StubCodeGenerator {
+     // Handle objArrays completely differently...
+     const jint objArray_lh = Klass::array_layout_helper(T_OBJECT);
+     __ lw(lh, Address(scratch_src_klass, lh_offset));
+-    __ mvw(t0, objArray_lh);
++    __ mv(t0, objArray_lh);
+     __ beq(lh, t0, L_objArray);
+ 
+     // if [src->klass() != dst->klass()] then return -1
+@@ -1866,7 +1866,7 @@ class StubGenerator: public StubCodeGenerator {
+     {
+       BLOCK_COMMENT("assert primitive array {");
+       Label L;
+-      __ mvw(t1, Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift);
++      __ mv(t1, Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift);
+       __ bge(lh, t1, L);
+       __ stop("must be a primitive array");
+       __ bind(L);
+@@ -1939,7 +1939,7 @@ class StubGenerator: public StubCodeGenerator {
+       Label L;
+       __ andi(lh, lh, Klass::_lh_log2_element_size_mask); // lh -> x22_elsize
+       __ addw(lh, lh, zr);
+-      __ mvw(t0, LogBytesPerLong);
++      __ mv(t0, LogBytesPerLong);
+       __ beq(x22_elsize, t0, L);
+       __ stop("must be long copy, but elsize is wrong");
+       __ bind(L);
+@@ -1977,7 +1977,7 @@ class StubGenerator: public StubCodeGenerator {
+     {
+       // Before looking at dst.length, make sure dst is also an objArray.
+       __ lwu(t0, Address(t2, lh_offset));
+-      __ mvw(t1, objArray_lh);
++      __ mv(t1, objArray_lh);
+       __ bne(t0, t1, L_failed);
+ 
+       // It is safe to examine both src.length and dst.length.
+@@ -3855,7 +3855,7 @@ class StubGenerator: public StubCodeGenerator {
+       __ sd(x10, Address(sp, 1 * wordSize));
+     }
+ 
+-    __ mvw(c_rarg1, (return_barrier ? 1 : 0));
++    __ mv(c_rarg1, (return_barrier ? 1 : 0));
+     __ call_VM_leaf(CAST_FROM_FN_PTR(address, Continuation::prepare_thaw), xthread, c_rarg1);
+     __ mv(t1, x10); // x10 contains the size of the frames to thaw, 0 if overflow or no more frames
+ 
+@@ -3895,7 +3895,7 @@ class StubGenerator: public StubCodeGenerator {
+     }
+ 
+     // If we want, we can templatize thaw by kind, and have three different entries
+-    __ mvw(c_rarg1, (uint32_t)kind);
++    __ mv(c_rarg1, (uint32_t)kind);
+ 
+     __ call_VM_leaf(Continuation::thaw_entry(), xthread, c_rarg1);
+     __ mv(t1, x10); // x10 is the sp of the yielding frame
+diff --git a/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp b/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
+index 448bb09ba761..af62f7d77eb4 100644
+--- a/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
++++ b/src/hotspot/cpu/riscv/vtableStubs_riscv.cpp
+@@ -90,7 +90,7 @@ VtableStub* VtableStubs::create_vtable_stub(int vtable_index) {
+ 
+     // check offset vs vtable length
+     __ lwu(t0, Address(t2, Klass::vtable_length_offset()));
+-    __ mvw(t1, vtable_index * vtableEntry::size());
++    __ mv(t1, vtable_index * vtableEntry::size());
+     __ bgt(t0, t1, L);
+     __ enter();
+     __ mv(x12, vtable_index);

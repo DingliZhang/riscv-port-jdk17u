@@ -1,0 +1,5 @@
+8293781: RISC-V: Clarify types of calls
+8296301: Interpreter(RISC-V): Implement -XX:+PrintBytecodeHistogram and -XX:+PrintBytecodePairHistogram options
+8296630: Fix SkipIfEqual on AArch64 and RISC-V
+8299844: RISC-V: Implement _onSpinWait intrinsic
+8299525: RISC-V: Add backend support for half float conversion intrinsics

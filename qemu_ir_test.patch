@@ -1,0 +1,75 @@
+diff --git a/test/hotspot/jtreg/compiler/lib/ir_framework/driver/FlagVMProcess.java b/test/hotspot/jtreg/compiler/lib/ir_framework/driver/FlagVMProcess.java
+index c39b045b07f..73c86daa906 100644
+--- a/test/hotspot/jtreg/compiler/lib/ir_framework/driver/FlagVMProcess.java
++++ b/test/hotspot/jtreg/compiler/lib/ir_framework/driver/FlagVMProcess.java
+@@ -39,6 +39,8 @@ import java.util.Arrays;
+ import java.util.List;
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
++import java.io.File;
++import java.nio.file.Path;
+ 
+ /**
+  * This class prepares, creates, and runs the "flag" VM with verification of proper termination. The flag VM determines
+@@ -116,8 +118,14 @@ public class FlagVMProcess {
+         } catch (Exception e) {
+             throw new TestRunException("Failed to execute TestFramework flag VM", e);
+         }
+-        testVMFlagsFile = FlagVM.TEST_VM_FLAGS_FILE_PREFIX + oa.pid()
+-                          + FlagVM.TEST_VM_FLAGS_FILE_POSTFIX;
++        final Path path = Paths.get(".").toAbsolutePath().getParent().toAbsolutePath();
++        final File file = path.toFile();
++        final File[] files = file.listFiles();
++        for (File file1: files){
++            if (file1.getName().contains(FlagVM.TEST_VM_FLAGS_FILE_PREFIX)) {
++                testVMFlagsFile = file1.getName();
++            }
++        }
+         checkFlagVMExitCode();
+     }
+ 
+diff --git a/test/hotspot/jtreg/compiler/lib/ir_framework/driver/irmatching/parser/HotSpotPidFileParser.java b/test/hotspot/jtreg/compiler/lib/ir_framework/driver/irmatching/parser/HotSpotPidFileParser.java
+index 94ebd54ec9a..3048146c8a4 100644
+--- a/test/hotspot/jtreg/compiler/lib/ir_framework/driver/irmatching/parser/HotSpotPidFileParser.java
++++ b/test/hotspot/jtreg/compiler/lib/ir_framework/driver/irmatching/parser/HotSpotPidFileParser.java
+@@ -35,6 +35,8 @@ import java.util.HashMap;
+ import java.util.Map;
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
++import java.io.File;
++import java.nio.file.Path;
+ 
+ /**
+  * Class to parse the PrintIdeal and PrintOptoAssembly outputs of the test class from the hotspot_pid* file and add them
+@@ -62,6 +64,15 @@ class HotSpotPidFileParser {
+      * methods of the test class that need to be IR matched (found in compilations map).
+      */
+     public Collection<IRMethod> parseCompilations(String hotspotPidFileName) {
++        final Path path = Paths.get(".").toAbsolutePath().getParent().toAbsolutePath();
++        final File file = path.toFile();
++        final File[] files = file.listFiles();
++        for (File file1: files){
++            if (file1.getName().contains("hotspot_pid")) {
++                hotspotPidFileName = file1.getName();
++            }
++        }
++        System.out.println("hotspotPidFileName:" + hotspotPidFileName);
+         try {
+             processFileLines(hotspotPidFileName);
+             return compilationsMap.values();
+@@ -73,6 +84,15 @@ class HotSpotPidFileParser {
+     }
+ 
+     private void processFileLines(String hotspotPidFileName) throws IOException {
++        final Path path = Paths.get(".").toAbsolutePath().getParent().toAbsolutePath();
++        final File file = path.toFile();
++        final File[] files = file.listFiles();
++        for (File file1: files){
++            if (file1.getName().contains("hotspot_pid")) {
++                hotspotPidFileName = file1.getName();
++            }
++        }
++        System.out.println("hotspotPidFileName:" + hotspotPidFileName);
+         Map<Integer, IRMethod> compileIdMap = new HashMap<>();
+         try (var reader = Files.newBufferedReader(Paths.get(hotspotPidFileName))) {
+             Line line = new Line(reader, compileIdPatternForTestClass);

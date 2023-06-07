@@ -1,0 +1,97 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index af23ea46775..313687e4573 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1021,7 +1021,7 @@ void LIR_Assembler::emit_alloc_obj(LIR_OpAllocObj* op) {
+   if (op->init_check()) {
+     __ lbu(t0, Address(op->klass()->as_register(),
+                        InstanceKlass::init_state_offset()));
+-    __ mv(t1, InstanceKlass::fully_initialized);
++    __ mv(t1, (u1)InstanceKlass::fully_initialized);
+     add_debug_info_for_null_check_here(op->stub()->info());
+     __ bne(t0, t1, *op->stub()->entry(), /* is_far */ true);
+   }
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 3270518d0e4..214520c9510 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -2083,7 +2083,7 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+     return;
+   }
+ 
+-  if (((uint64_t)(uintptr_t)CompressedKlassPointers::base() & 0xffffffff) == 0 &&
++  if (((uint64_t)CompressedKlassPointers::base() & 0xffffffff) == 0 &&
+       CompressedKlassPointers::shift() == 0) {
+     zero_extend(dst, src, 32);
+     return;
+@@ -2095,7 +2095,7 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+   }
+ 
+   assert_different_registers(src, xbase);
+-  mv(xbase, (intptr_t)CompressedKlassPointers::base());
++  mv(xbase, (uintptr_t)CompressedKlassPointers::base());
+   sub(dst, src, xbase);
+   if (CompressedKlassPointers::shift() != 0) {
+     assert(LogKlassAlignmentInBytes == CompressedKlassPointers::shift(), "decode alg wrong");
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index 477affceccf..d304f084808 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -2444,7 +2444,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+   // n.b. 3 gp args, 0 fp args, integral return type
+ 
+   __ mv(c_rarg0, xthread);
+-  __ mv(c_rarg2, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg2, Deoptimization::Unpack_uncommon_trap);
+   RuntimeAddress target(CAST_FROM_FN_PTR(address, Deoptimization::uncommon_trap));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+@@ -2571,7 +2571,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+ 
+   // sp should already be aligned
+   __ mv(c_rarg0, xthread);
+-  __ mv(c_rarg1, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg1, Deoptimization::Unpack_uncommon_trap);
+   target = RuntimeAddress(CAST_FROM_FN_PTR(address, Deoptimization::unpack_frames));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index be95e96e73d..c7f00f3d890 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -1852,7 +1852,7 @@ class StubGenerator: public StubCodeGenerator {
+     {
+       BLOCK_COMMENT("assert primitive array {");
+       Label L;
+-      __ mv(t1, Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift);
++      __ mv(t1, (int32_t)(Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift));
+       __ bge(lh, t1, L);
+       __ stop("must be a primitive array");
+       __ bind(L);

@@ -1,0 +1,26 @@
+diff --git a/src/hotspot/cpu/aarch64/gc/shared/barrierSetAssembler_aarch64.hpp b/src/hotspot/cpu/aarch64/gc/shared/barrierSetAssembler_aarch64.hpp
+index 935f8a91564..cbcc3b1465d 100644
+--- a/src/hotspot/cpu/aarch64/gc/shared/barrierSetAssembler_aarch64.hpp
++++ b/src/hotspot/cpu/aarch64/gc/shared/barrierSetAssembler_aarch64.hpp
+@@ -41,7 +41,7 @@ class BarrierSetAssembler: public CHeapObj<mtGC> {
+   virtual void arraycopy_prologue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
+                                   Register src, Register dst, Register count, RegSet saved_regs) {}
+   virtual void arraycopy_epilogue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
+-                                  Register start, Register end, Register tmp, RegSet saved_regs) {}
++                                  Register start, Register count, Register tmp, RegSet saved_regs) {}
+   virtual void load_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,
+                        Register dst, Address src, Register tmp1, Register tmp_thread);
+   virtual void store_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,
+diff --git a/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.hpp b/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.hpp
+index 5e470e8b5f5..d94ca97a103 100644
+--- a/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.hpp
++++ b/src/hotspot/cpu/riscv/gc/shared/barrierSetAssembler_riscv.hpp
+@@ -42,7 +42,7 @@ class BarrierSetAssembler: public CHeapObj<mtGC> {
+   virtual void arraycopy_prologue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
+                                   Register src, Register dst, Register count, RegSet saved_regs) {}
+   virtual void arraycopy_epilogue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
+-                                  Register start, Register end, Register tmp, RegSet saved_regs) {}
++                                  Register start, Register count, Register tmp, RegSet saved_regs) {}
+   virtual void load_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,
+                        Register dst, Address src, Register tmp1, Register tmp2);
+   virtual void store_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,

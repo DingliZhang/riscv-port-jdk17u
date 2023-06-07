@@ -1,0 +1,115 @@
+diff --git a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+index f234697ab89f..79544e36d5a3 100644
+--- a/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/c1_LIRAssembler_riscv.cpp
+@@ -1001,7 +1001,7 @@ void LIR_Assembler::emit_alloc_obj(LIR_OpAllocObj* op) {
+   if (op->init_check()) {
+     __ lbu(t0, Address(op->klass()->as_register(),
+                        InstanceKlass::init_state_offset()));
+-    __ mv(t1, InstanceKlass::fully_initialized);
++    __ mv(t1, (u1)InstanceKlass::fully_initialized);
+     add_debug_info_for_null_check_here(op->stub()->info());
+     __ bne(t0, t1, *op->stub()->entry(), /* is_far */ true);
+   }
+diff --git a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+index 6954a29e1820..15f72b52411e 100644
+--- a/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
++++ b/src/hotspot/cpu/riscv/macroAssembler_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -2150,7 +2150,7 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+     return;
+   }
+ 
+-  if (((uint64_t)(uintptr_t)CompressedKlassPointers::base() & 0xffffffff) == 0 &&
++  if (((uint64_t)CompressedKlassPointers::base() & 0xffffffff) == 0 &&
+       CompressedKlassPointers::shift() == 0) {
+     zero_extend(dst, src, 32);
+     return;
+@@ -2162,7 +2162,7 @@ void MacroAssembler::encode_klass_not_null(Register dst, Register src, Register
+   }
+ 
+   assert_different_registers(src, xbase);
+-  mv(xbase, (intptr_t)CompressedKlassPointers::base());
++  mv(xbase, (uintptr_t)CompressedKlassPointers::base());
+   sub(dst, src, xbase);
+   if (CompressedKlassPointers::shift() != 0) {
+     assert(LogKlassAlignmentInBytes == CompressedKlassPointers::shift(), "decode alg wrong");
+diff --git a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+index a61784b0f2d6..53faf8e358a2 100644
+--- a/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
++++ b/src/hotspot/cpu/riscv/sharedRuntime_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -2142,7 +2142,7 @@ void SharedRuntime::generate_deopt_blob() {
+     __ mv(t0, -1);
+     __ sw(t0, Address(xthread, in_bytes(JavaThread::pending_deoptimization_offset())));
+ 
+-    __ mv(xcpool, (int32_t)Deoptimization::Unpack_reexecute);
++    __ mv(xcpool, Deoptimization::Unpack_reexecute);
+     __ mv(c_rarg0, xthread);
+     __ orrw(c_rarg2, zr, xcpool); // exec mode
+     RuntimeAddress target(CAST_FROM_FN_PTR(address, Deoptimization::uncommon_trap));
+@@ -2483,7 +2483,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+   // n.b. 3 gp args, 0 fp args, integral return type
+ 
+   __ mv(c_rarg0, xthread);
+-  __ mv(c_rarg2, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg2, Deoptimization::Unpack_uncommon_trap);
+   RuntimeAddress target(CAST_FROM_FN_PTR(address, Deoptimization::uncommon_trap));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+@@ -2610,7 +2610,7 @@ void SharedRuntime::generate_uncommon_trap_blob() {
+ 
+   // sp should already be aligned
+   __ mv(c_rarg0, xthread);
+-  __ mv(c_rarg1, (unsigned)Deoptimization::Unpack_uncommon_trap);
++  __ mv(c_rarg1, Deoptimization::Unpack_uncommon_trap);
+   target = RuntimeAddress(CAST_FROM_FN_PTR(address, Deoptimization::unpack_frames));
+   __ relocate(target.rspec(), [&] {
+     int32_t offset;
+diff --git a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+index 7a33edb9f81c..a0b9e862c58b 100644
+--- a/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
++++ b/src/hotspot/cpu/riscv/stubGenerator_riscv.cpp
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
+- * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -1866,7 +1866,7 @@ class StubGenerator: public StubCodeGenerator {
+     {
+       BLOCK_COMMENT("assert primitive array {");
+       Label L;
+-      __ mv(t1, Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift);
++      __ mv(t1, (int32_t)(Klass::_lh_array_tag_type_value << Klass::_lh_array_tag_shift));
+       __ bge(lh, t1, L);
+       __ stop("must be a primitive array");
+       __ bind(L);
+@@ -3895,7 +3895,7 @@ class StubGenerator: public StubCodeGenerator {
+     }
+ 
+     // If we want, we can templatize thaw by kind, and have three different entries
+-    __ mv(c_rarg1, (uint32_t)kind);
++    __ mv(c_rarg1, kind);
+ 
+     __ call_VM_leaf(Continuation::thaw_entry(), xthread, c_rarg1);
+     __ mv(t1, x10); // x10 is the sp of the yielding frame
